@@ -75,6 +75,21 @@ export class InMemorySubscriptionRepository implements ISubscriptionRepository {
   rows = new Map<string, SubscriptionRow>();
   async save(s: Subscription) { this.rows.set(s.tenantId.value, SubscriptionMapper.toPersistence(s)); }
   async findByTenant(t: string) { const r = this.rows.get(t); return r ? SubscriptionMapper.toDomain(r) : null; }
+  async findByExternalCustomerId(c: string) {
+    const r = [...this.rows.values()].find((x) => x.external_customer_id === c);
+    return r ? SubscriptionMapper.toDomain(r) : null;
+  }
+  async countByPlanAndStatus() {
+    const map = new Map<string, number>();
+    for (const r of this.rows.values()) {
+      const key = r.plan + ":" + r.status;
+      map.set(key, (map.get(key) || 0) + 1);
+    }
+    return [...map.entries()].map(([k, count]) => {
+      const [plan, status] = k.split(':');
+      return { plan, status, count };
+    });
+  }
 }
 
 export class InMemoryBookableResourceRepository implements IBookableResourceRepository {

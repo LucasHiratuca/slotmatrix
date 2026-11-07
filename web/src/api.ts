@@ -163,6 +163,22 @@ export interface KpiSummaryDto {
   >;
 }
 
+export interface AdminMetricsDto {
+  mrrCents: number;
+  mrrFormatted: string;
+  activeSubscriptionsCount: number;
+  distribution: Record<string, { total: number; active: number }>;
+  recentLogs: {
+    id: string;
+    action: string;
+    resourceType: string;
+    resourceId: string;
+    userId: string;
+    details: any;
+    occurredAt: string;
+  }[];
+}
+
 export class ApiHttpError extends Error {
   constructor(
     public readonly status: number,

@@ -23,9 +23,11 @@ export class BillingWebhookAcl implements IBillingWebhookAcl {
     const p = payload as any;
     if (!p || typeof p.id !== 'string' || typeof p.type !== 'string') throw new ValidationError('Malformed billing event');
     const obj = p.data?.object ?? {};
-    const tenantId: unknown = obj.metadata?.workspace_id;
-    if (typeof tenantId !== 'string' || !tenantId) throw new ValidationError('Billing event is missing metadata.workspace_id');
-    const base = { externalEventId: p.id as string, tenantId };
+    const rawTenantId = obj.metadata?.workspace_id || obj.client_reference_id;
+    const tenantId: string = typeof rawTenantId === 'string' ? rawTenantId : '';
+    const externalCustomerId: string | undefined = typeof obj.customer === 'string' ? obj.customer : undefined;
+    if (!tenantId && !externalCustomerId) throw new ValidationError('Billing event is missing metadata.workspace_id or customer ID');
+    const base = { externalEventId: p.id as string, tenantId, externalCustomerId };
 
     switch (p.type) {
       case 'checkout.session.completed':

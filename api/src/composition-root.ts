@@ -13,6 +13,7 @@ import { IProcessedWebhookStore } from './billing/application/ports';
 import { SubscriptionEntitlementPolicy } from './billing/application/SubscriptionEntitlementPolicy';
 import { ProcessBillingWebhookUseCase } from './billing/application/ProcessBillingWebhookUseCase';
 import { BillingWebhookAcl } from './billing/infrastructure/BillingWebhookAcl';
+import { StripeBillingGateway } from './billing/infrastructure/stripe-client';
 import {
   BootstrapWorkspaceOnSignupUseCase,
   ChangeMemberRoleUseCase,
@@ -71,6 +72,9 @@ export interface Infrastructure {
 export interface AppConfig {
   billingWebhookSecret: string;
   selfBaseUrl?: string;
+  stripeSecretKey?: string;
+  stripeWebhookSecret?: string;
+  appPublicUrl?: string;
 }
 
 export function buildContainer(infra: Infrastructure, config: AppConfig) {
@@ -162,7 +166,9 @@ export function buildContainer(infra: Infrastructure, config: AppConfig) {
   const audit = new OnDomainEventAuditHandler({ audit: infra.auditLogs });
   for (const name of AUDITED_EVENTS) dispatcher.register(name, audit);
 
-  return { infra, config, dispatcher, entitlements, tenancy, catalog, scheduling, queries, billing, acl };
+  const stripeGateway = new StripeBillingGateway(config.stripeSecretKey, config.stripeWebhookSecret);
+
+  return { infra, config, dispatcher, entitlements, tenancy, catalog, scheduling, queries, billing, acl, stripeGateway };
 }
 
 export type Container = ReturnType<typeof buildContainer>;

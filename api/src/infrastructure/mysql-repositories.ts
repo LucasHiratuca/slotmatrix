@@ -183,6 +183,29 @@ export class MySqlSubscriptionRepository implements ISubscriptionRepository {
       );
     return rows[0] ? SubscriptionMapper.toDomain(rows[0]) : null;
   }
+
+  async findByExternalCustomerId(customerId: string): Promise<Subscription | null> {
+    const [rows] = await this.db
+      .conn()
+      .query<(SubscriptionRow & RowDataPacket)[]>(
+        'SELECT * FROM subscriptions WHERE external_customer_id = ? LIMIT 1',
+        [customerId],
+      );
+    return rows[0] ? SubscriptionMapper.toDomain(rows[0]) : null;
+  }
+
+  async countByPlanAndStatus(): Promise<{ plan: string; status: string; count: number }[]> {
+    const [rows] = await this.db
+      .conn()
+      .query<(RowDataPacket & { plan: string; status: string; count: number })[]>(
+        'SELECT plan, status, COUNT(*) AS count FROM subscriptions GROUP BY plan, status',
+      );
+    return rows.map((r: any) => ({
+      plan: r.plan,
+      status: r.status,
+      count: Number(r.count),
+    }));
+  }
 }
 
 export class MySqlBookableResourceRepository implements IBookableResourceRepository {

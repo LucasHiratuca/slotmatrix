@@ -16,6 +16,9 @@ async function bootstrap() {
   const container = buildContainer(infra, {
     billingWebhookSecret: env.billingWebhookSecret,
     selfBaseUrl: `http://127.0.0.1:${env.port}`,
+    stripeSecretKey: env.stripeSecretKey,
+    stripeWebhookSecret: env.stripeWebhookSecret,
+    appPublicUrl: env.appPublicUrl,
   });
 
   if (process.env.AUTO_SEED !== 'false') {

@@ -2,6 +2,7 @@
 
 > **ISW055 · Atividade 9 · Fork e Plano de Negócio**  
 > **ISW055 · Atividade 10 · Seu Negócio no Ar (Transição de Domínio)**  
+> **ISW055 · Atividade 11 · Assinatura recorrente (SaaS completo — planos, limites e assinatura com Stripe)**  
 > **Orientador:** Professor [@siriani](https://github.com/siriani)  
 > **Autor:** Lucas Tetsuya Hiratuca  
 > **Repositório do Produto:** [LucasHiratuca/slotmatrix](https://github.com/LucasHiratuca/slotmatrix)  
@@ -53,24 +54,51 @@
 
 ---
 
-## 6. Modelo de Receita com Stripe
+## 6. Modelo de Assinatura Recorrente com Stripe (Atividade 11)
 
 O faturamento é recorrente mensal (**SaaS B2B via Stripe Subscriptions**), baseado no volume de recursos físicos gerenciados e funcionalidades de automação:
 
 | Plano | Preço Mensal | Limites e Direitos do Plano | Público-Alvo e Motivo do Upgrade |
 | :--- | :---: | :--- | :--- |
-| **STARTER** | **R$ 149,00 / mês** | • Até **5 recursos alocáveis** ativos (`SPECIALIST`, `ROOM`, `EQUIPMENT`)<br>• Até 150 agendamentos/mês<br>• Alocação multi-recurso básica<br>• Portal de agendamento online<br>*(Smart Waitlist e Sinal Anti-No-Show DESATIVADOS)* | Pequenos consultórios e estúdios em fase inicial. Dá previsibilidade de agenda. |
-| **PRO** *(Principal)* | **R$ 349,00 / mês** | • Até **20 recursos alocáveis** ativos<br>• Agendamentos **ILIMITADOS**<br>• **Buffers assimétricos de esterilização** (`TurnaroundBuffer`)<br>• **Proteção Anti-No-Show** (cobrança de sinal e retenção de penalidade no Stripe)<br>• **Smart Waitlist Ativa** (oferta em cascata com expiração de 30 min via BullMQ) | Clínicas de médio porte e centros diagnósticos. O plano se paga recuperando **uma única falta** evitada por mês. |
-| **ENTERPRISE** | **R$ 890,00 / mês** | • Recursos e agendamentos **ILIMITADOS**<br>• Multi-unidades / Multi-workspace<br>• Webhooks assinados customizados (HMAC-SHA256)<br>• Exportação de **AuditLog Imutável** para auditorias ISO e vigilância sanitária<br>• Suporte prioritário com SLA de 4h | Redes de policlínicas e hospitais-dia com alta exigência de conformidade e auditoria. |
+| **STARTER (Free)** | **R$ 0,00 / mês** | • Até **5 recursos alocáveis** ativos (`SPECIALIST`, `ROOM`, `EQUIPMENT`)<br>• Até 100 agendamentos/mês<br>• Limite estrito no backend (HTTP 402 se tentar criar o 6º recurso)<br>• *Smart Waitlist e Sinal Anti-No-Show DESATIVADOS* | Clínicas e consultórios individuais em fase de teste. |
+| **PRO** *(Principal)* | **R$ 349,00 / mês** | • Até **20 recursos alocáveis** ativos<br>• Agendamentos **ILIMITADOS**<br>• **Buffers assimétricos de esterilização** (`TurnaroundBuffer`)<br>• **Proteção Anti-No-Show** (cobrança de sinal e retenção de penalidade no Stripe)<br>• **Smart Waitlist Ativa** (oferta em cascata com expiração temporizada)<br>• **Portal Público de Autoagendamento** liberado | Clínicas de médio porte e centros diagnósticos. O plano se paga recuperando **uma única falta** evitada por mês. |
+| **ENTERPRISE** | **R$ 890,00 / mês** | • Recursos e agendamentos **ILIMITADOS**<br>• Multi-unidades / Multi-workspace<br>• **Fila de Espera com Prioridade VIP**<br>• Exportação de **AuditLog Imutável** para auditorias ISO e vigilância sanitária<br>• Suporte prioritário com SLA | Redes de policlínicas e hospitais-dia com alta exigência de conformidade e auditoria. |
+
+### Ciclo de Vida da Assinatura e Webhooks (4 Eventos Fundamentais)
+
+O plano do usuário **nunca muda porque o navegador voltou do checkout dizendo que deu certo**. Ele muda única e exclusivamente quando o Webhook oficial do Stripe chega, tem sua assinatura criptográfica validada e é processado com garantia de idempotência.
+
+```mermaid
+flowchart LR
+    User["Usuário (Owner/Admin)"] -->|1. POST /billing/checkout| API["API SlotMatrix"]
+    API -->|2. Cria Sessão mode='subscription'| Stripe["Stripe Checkout"]
+    Stripe -->|3. Pagamento de Teste (4242)| Stripe
+    Stripe -->|4. Webhook Assinado| Webhook["POST /webhooks/stripe"]
+    Webhook -->|5. Valida Assinatura & Idempotência| Domain["Subscription Aggregate"]
+    Domain -->|6. Atualiza Plano & Customer ID| DB[(MariaDB)]
+    User -->|7. POST /billing/portal| Portal["Stripe Customer Portal"]
+    Portal -->|8. Cancelamento / Troca de Plano| Stripe
+```
+
+| Evento Stripe | Quando chega | Ação no Domínio SlotMatrix |
+| :--- | :--- | :--- |
+| `checkout.session.completed` | Cliente conclui o checkout da assinatura recorrente | Associa o `customer` e `subscription` do Stripe ao Workspace e ativa o plano (`PRO` ou `ENTERPRISE`) |
+| `customer.subscription.updated` | Troca de plano, renovação ou alteração no portal | Atualiza o plano e o status da assinatura (`ACTIVE`, `PAST_DUE`, `CANCELED`) |
+| `customer.subscription.deleted` | A assinatura foi encerrada | Reseta o Workspace de volta ao plano gratuito `STARTER` e cancela a subscrição |
+| `invoice.payment_failed` | A cobrança mensal recorrente falhou | Marca a assinatura como `PAST_DUE` (inadimplente), bloqueando novos agendamentos operacionais |
 
 ---
 
-## 7. Métricas de Sucesso
+## 7. Portal do Cliente (Billing Portal) e Painel Administrativo de MRR
 
-1. **MRR (Monthly Recurring Revenue):** Meta de atingir **R$ 15.000,00** de MRR em 6 meses (~45 clientes PRO).
-2. **Taxa de Retenção e Churn:** Churn mensal inferior a **2,0%**, ancorado no fato de que o sistema se torna o coração operacional da clínica.
-3. **Taxa de Recuperação de Horários Vagos:** Mais de **65% dos horários cancelados** preenchidos automaticamente pela Smart Waitlist em até 2 horas.
-4. **Queda no Índice de No-Show:** Redução das faltas de **18% para menos de 4%** com o sinal caução via Stripe.
+1. **Customer Billing Portal (`POST /api/billing/portal`):**
+   * Redireciona o cliente diretamente para a página segura hospedada pela Stripe (`stripe.billingPortal.sessions.create`).
+   * Permite troca de cartão, alteração de plano e cancelamento imediato sem intervenção manual do suporte.
+2. **Dashboard do SaaS & Cálculo de MRR (`GET /api/admin/metrics`):**
+   * Disponível para perfis `ADMIN` e `OWNER`.
+   * Calcula o **Monthly Recurring Revenue (MRR)** somando assinaturas ativas:
+     $$\text{MRR} = (\text{Qtd}_{\text{PRO}} \times \text{R\$} 349,00) + (\text{Qtd}_{\text{ENTERPRISE}} \times \text{R\$} 890,00)$$
+   * Exibe total de assinaturas ativas, distribuição por plano (`STARTER`, `PRO`, `ENTERPRISE`) e os últimos logs de auditoria imutáveis.
 
 ---
 
@@ -83,8 +111,8 @@ O faturamento é recorrente mensal (**SaaS B2B via Stripe Subscriptions**), base
 | **3. Proposta Única de Valor** | Alocação atômica multi-recurso com buffers assimétricos de esterilização, proteção financeira anti-no-show e fila de espera inteligente que preenche desistências em cascata sem intervenção humana. |
 | **4. Solução** | 1. **Engine de Alocação Concorrente:** Bloqueio atômico com `SELECT ... FOR UPDATE` de Médico + Sala + Máquina respeitando tempos de limpeza.<br>2. **Anti-No-Show no Stripe:** Cobrança de sinal e regras de cancelamento com retenção escalonada.<br>3. **Smart Waitlist em Cascata:** Oferta temporizada com expiração automática (30 min) para o próximo paciente da fila. |
 | **5. Canais** | • Parcerias com revendedores e locadores de equipamentos de imagem (GE, Philips, Canon).<br>• Demonstrações guiadas em eventos da Associação Brasileira de Clínicas Médicas.<br>• Tráfego pago focado em termos específicos: *"software agenda centro cirúrgico"*, *"controle de salas e equipamentos clínica"*. |
-| **6. Fontes de Receita** | • Assinatura mensal SaaS via Stripe: Plano Starter (R$ 149/mês), Plano Pro (R$ 349/mês) e Plano Enterprise (R$ 890/mês).<br>• Taxa transacional opcional sobre processamento de sinal garantidor anti-no-show. |
-| **7. Estrutura de Custos** | • Infraestrutura de nuvem: Servidor Docker/Portainer na Fatec / VPS de produção, instâncias MariaDB e Redis.<br>• Provedor de Object Storage S3 (Garage S3 / MinIO / AWS S3) para documentação e laudos.<br>• Taxas financeiras de gateway (Stripe Checkout). |
+| **6. Fontes de Receita** | • Assinatura mensal recorrente via Stripe: Plano Starter (R$ 0/mês), Plano Pro (R$ 349/mês) e Plano Enterprise (R$ 890/mês).<br>• Taxa transacional opcional sobre processamento de sinal garantidor anti-no-show. |
+| **7. Estrutura de Custos** | • Infraestrutura de nuvem: Servidor Docker/Portainer na Fatec / VPS de produção, instâncias MariaDB e Redis.<br>• Provedor de Object Storage S3 para documentação e laudos.<br>• Taxas financeiras de gateway (Stripe Checkout). |
 | **8. Métricas-Chave** | • MRR e número de Workspaces ativos.<br>• Volume mensal de agendamentos processados.<br>• Valor total de receita salva via retenção de sinal e vagas recuperadas pela Waitlist.<br>• Net Promoter Score (NPS) dos gestores operacionais. |
 | **9. Vantagem Injusta** | Algoritmo proprietário de resolução de conflitos simultâneos com buffers assimétricos (`TurnaroundBuffer`) somado à trilha de auditoria imutável por triggers MySQL, difícil de ser reproduzido por prontuários genéricos legados. |
 
@@ -92,102 +120,18 @@ O faturamento é recorrente mensal (**SaaS B2B via Stripe Subscriptions**), base
 
 ## 9. Mapa de Reaproveitamento da Arquitetura
 
-Nenhum serviço ou linha de infraestrutura construído na primeira fase da disciplina foi desperdiçado. A arquitetura de microsserviços foi integralmente reaproveitada e redirecionada para o modelo de negócio:
-
 | Peça do Projeto Anterior (Filmes) | O que vira no SaaS SlotMatrix | Descrição Técnica no Domínio |
 | :--- | :--- | :--- |
 | **Catálogo de Filmes (TMDB)** | **Catálogo de Recursos e Procedimentos (`catalog`)** | O consumo de filmes dá lugar à modelagem completa de `BookableResources` (`SPECIALIST`, `ROOM`, `EQUIPMENT`) e `ServiceProcedures` com requisitos de competências e tempos de esterilização. |
 | **Microsserviço de Login + RBAC** | **Módulo de Tenancy & RBAC (`tenancy`)** | Autenticação JWT com isolamento multi-tenant (`Workspace`) e 4 papéis de negócio rígidos: `OWNER`, `ADMIN`, `COORDINATOR` e `SPECIALIST` com enforcement HTTP 403. |
-| **Logs e Auditoria com Redis** | **Barramento de Eventos e Trilha Imutável (`audit`)** | Eventos temporais de auditoria no Redis Streams (`audit:events`) e tabela `audit_logs` blindada por triggers MySQL contra `UPDATE` e `DELETE` para eventos de negócio: agendamento, cancelamento, disparo de oferta e retenção de sinal. |
+| **Logs e Auditoria com Redis** | **Barramento de Eventos e Trilha Imutável (`audit`)** | Eventos temporais de auditoria no Redis Streams (`audit:events`) e tabela `audit_logs` blindada por triggers MySQL contra `UPDATE` e `DELETE` para eventos de negócio. |
 | **Upload e Perfil (Garage S3 / MinIO)** | **Storage de Laudos e Equipamentos (`storage`)** | O upload de avatares é reaproveitado para anexos do domínio (comprovantes de manutenção de equipamentos, laudos técnicos e guias de autorização médica) via streaming seguro pelo backend. |
-| **Plano Premium (Stripe Checkout & Webhooks)** | **Mecanismo de Assinatura B2B & Sinal (`billing`)** | A assinatura mensal vira os planos `STARTER` (R$ 149/mês), `PRO` (R$ 349/mês) e `ENTERPRISE` (R$ 890/mês), processando webhooks assinados (`whsec_...`) e atualizando quotas dinamicamente no banco. |
-| **Swagger, Workers e Testes Automatizados** | **OpenAPI 3.0, BullMQ & Vitest** | Documentação interativa Swagger em `/api/docs`, fila BullMQ com Redis para expiração de ofertas de waitlist e 7 suítes completas de testes automatizados com 39 asserções. |
+| **Plano Premium (Stripe Checkout & Webhooks)** | **Assinaturas Recorrentes, Portal & MRR (`billing`)** | Cobrança mensal via Stripe Subscriptions (`mode='subscription'`), Customer Portal para troca/cancelamento, 4 webhooks sincronizados, enforcement de limites por requisição (HTTP 402) e dashboard com cálculo de MRR. |
+| **Swagger, Workers e Testes Automatizados** | **OpenAPI 3.0, BullMQ & Vitest** | Documentação interativa Swagger em `/api/docs`, fila BullMQ com Redis para expiração de ofertas de waitlist e 7 suítes completas de testes automatizados com 40 asserções. |
 
 ---
 
-## 10. Backlog no GitHub (Roteiro de Desenvolvimento)
-
-Foram estruturadas e planejadas as seguintes issues fundamentais no repositório:
-
-1. **Issue #1: [DOMAIN] Modelar agregados de Recursos, Procedimentos e Alocação Concorrente**
-   * *Descrição:* Criar tabelas e agregados de `BookableResource` e `ServiceProcedure` com requisitos por categoria e buffers de higienização.
-   * *Critérios de Aceite:* Script `migrations/001_init.sql` funcional com constraints e chaves estrangeiras.
-2. **Issue #2: [RBAC] Implementar controle de acesso por papel com 4 perfis clínicos**
-   * *Descrição:* Suporte a `OWNER`, `ADMIN`, `COORDINATOR` e `SPECIALIST` no módulo de tenancy.
-   * *Critérios de Aceite:* Middleware verificando JWT e respondendo HTTP 403 Forbidden para chamadas não autorizadas.
-3. **Issue #3: [SCHEDULING] Algoritmo de bloqueio atômico pessimista e prevenção de Double-Booking**
-   * *Descrição:* Implementar `MultiResourceAvailabilityDomainService` com `SELECT ... FOR UPDATE` no MariaDB.
-   * *Critérios de Aceite:* Teste de concorrência garantindo que duas reservas simultâneas na mesma sala ou equipamento resultem em HTTP 409 Conflict.
-4. **Issue #4: [WAITLIST] Fila de espera inteligente com oferta em cascata e expiração via BullMQ**
-   * *Descrição:* Quando um agendamento for cancelado, identificar automaticamente o paciente mais prioritário e emitir `SlotOffer` com expiração de 30 minutos.
-   * *Critérios de Aceite:* Se o paciente não confirmar em 30 min, a oferta expira e é repassada ao próximo da fila.
-5. **Issue #5: [BILLING] Gestão de assinaturas e quotas com Stripe Webhook**
-   * *Descrição:* Endpoint para processamento de webhook do Stripe atualizando estado de subscrição (`ACTIVE`, `TRIALING`, `PAST_DUE`) e limitando criação de recursos conforme a cota do plano.
-   * *Critérios de Aceite:* No plano Starter com 5 recursos, tentar cadastrar o 6º dispara HTTP 402 QuotaExceededError.
-
----
-
-## 11. Arquitetura e Engenharia de Software
-
-### 11.1. Context Map (Domain-Driven Design — 4 Bounded Contexts)
-
-```mermaid
-flowchart TD
-    subgraph Tenancy["Bounded Context: tenancy (Supporting)"]
-        WS["Workspace Aggregate"]
-        USR["User & Member (RBAC)"]
-        AUD["AuditLog (Immutable)"]
-    end
-
-    subgraph Billing["Bounded Context: billing (Supporting)"]
-        SUB["Subscription Aggregate"]
-        PQ["PlanQuota VO"]
-        ACL["BillingWebhookAcl (Anti-Corruption Layer)"]
-        ENT_IMPL["SubscriptionEntitlementPolicy"]
-    end
-
-    subgraph Catalog["Bounded Context: catalog (Core Supporting)"]
-        BR["BookableResource Aggregate"]
-        SP["ServiceProcedure Aggregate"]
-        TB["TurnaroundBuffer & Money VOs"]
-    end
-
-    subgraph Scheduling["Bounded Context: scheduling (Core Domain)"]
-        BK["Booking Aggregate"]
-        WL["WaitlistEntry Aggregate + SlotOffer"]
-        AVAIL["MultiResourceAvailabilityDomainService"]
-        ENT_PORT["WorkspaceEntitlementPolicy (Domain Contract)"]
-    end
-
-    ACL -->|Translates Stripe/Gateway Payload| SUB
-    ENT_IMPL -.->|Implements Contract| ENT_PORT
-    SUB -->|Reads PlanQuota| ENT_IMPL
-    Catalog -->|Queries Quotas via| ENT_PORT
-    Scheduling -->|Queries Quotas via| ENT_PORT
-    Scheduling -->|Reads Qualified Resources & Procedures| Catalog
-    Scheduling -->|Publishes Domain Events| AUD
-    Billing -->|SubscriptionPlanChangedDomainEvent| Scheduling
-```
-
-### 11.2. Modelo Entidade-Relacionamento (MariaDB / MySQL)
-
-```mermaid
-erDiagram
-    workspaces ||--o{ workspace_members : "possui membros RBAC"
-    users ||--o{ workspace_members : "vinculado a"
-    workspaces ||--|| subscriptions : "governado por"
-    workspaces ||--o{ bookable_resources : "mantém catálogo"
-    workspaces ||--o{ service_procedures : "define"
-    workspaces ||--o{ bookings : "agenda"
-    bookings ||--|{ booking_resource_allocations : "bloqueia atomicamente"
-    bookable_resources ||--o{ booking_resource_allocations : "alocado em"
-    workspaces ||--o{ waitlist_entries : "enfileira"
-    workspaces ||--o{ audit_logs : "registra imutável"
-```
-
----
-
-## 12. Credenciais do Seed e Demonstração Operacional
+## 10. Credenciais do Seed e Demonstração Operacional
 
 Ao inicializar o sistema (ou rodar `npm run seed`), o banco é provisionado com dois Workspaces configurados para demonstração imediata:
 
@@ -197,11 +141,11 @@ Ao inicializar o sistema (ou rodar `npm run seed`), o banco é provisionado com 
 | **VitaScan Diagnósticos** | `PRO` (`ACTIVE`) | `admin@vitascan.test` | `Passw0rd!` | `ADMIN` | Gestão de equipe, catálogo de procedimentos e auditoria. |
 | **VitaScan Diagnósticos** | `PRO` (`ACTIVE`) | `coord@vitascan.test` | `Passw0rd!` | `COORDINATOR` | Operação diária: confirmação, check-in, no-show e cancelamentos. |
 | **VitaScan Diagnósticos** | `PRO` (`ACTIVE`) | `spec@vitascan.test` | `Passw0rd!` | `SPECIALIST` | Visão da grade clínica (bloqueado com HTTP 403 ao tentar criar recursos ou alterar planos). |
-| **Estúdio Aura** (`estudio-aura`) | `STARTER` (`TRIALING`) | `owner@aura.test` | `Passw0rd!` | `OWNER` | Cravado no **limite exato de 5/5 recursos ativos**. Tentar criar o 6º recurso dispara imediatamente `HTTP 402 QuotaExceededError`. |
+| **Estúdio Aura** (`estudio-aura`) | `STARTER` (`TRIALING`) | `owner@aura.test` | `Passw0rd!` | `OWNER` | Cravado no **limite exato de 5/5 recursos ativos**. Tentar criar o 6º recurso dispara imediatamente `HTTP 402 QuotaExceededError`. Ao assinar o plano Pro no Stripe, o limite é ampliado para 20 recursos e a criação do 6º recurso passa a ser aceita! |
 
 ---
 
-## 13. Como Executar
+## 11. Como Executar
 
 ### Portas dos Serviços
 * **MySQL / MariaDB (`slotmatrix_db`):** `localhost:13308`
@@ -214,7 +158,7 @@ Ao inicializar o sistema (ou rodar `npm run seed`), o banco é provisionado com 
 docker compose up --build -d
 ```
 
-### Executar Testes Automatizados (39 Testes em 7 Suítes)
+### Executar Testes Automatizados (40 Testes em 7 Suítes)
 ```bash
 cd api
 npm install

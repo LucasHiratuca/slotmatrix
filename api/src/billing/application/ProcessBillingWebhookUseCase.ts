@@ -20,7 +20,10 @@ export class ProcessBillingWebhookUseCase {
     const outcome = await this.d.uow.run(async () => {
       const isNew = await this.d.processed.registerIfNew(command.externalEventId, input.rawPayload, now);
       if (!isNew) return { duplicate: true as const, events: [] };
-      const sub = await this.d.subscriptions.findByTenant(command.tenantId);
+      let sub = command.tenantId ? await this.d.subscriptions.findByTenant(command.tenantId) : null;
+      if (!sub && command.externalCustomerId) {
+        sub = await this.d.subscriptions.findByExternalCustomerId(command.externalCustomerId);
+      }
       if (!sub) throw new NotFoundError('Subscription not found for workspace');
       switch (command.type) {
         case 'ACTIVATE_PLAN':

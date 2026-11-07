@@ -634,6 +634,127 @@ export function registerRoutes(kit: RouterKit, c: Container) {
     },
   });
 
+  kit.add({
+    method: 'post',
+    path: '/billing/checkout',
+    tag: 'Billing',
+    summary: 'Create Stripe Subscription Checkout Session (mode=subscription)',
+    access: 'tenant',
+    minRole: 'ADMIN',
+    body: z.object({
+      plan: z.enum(['PRO', 'ENTERPRISE']).default('PRO'),
+    }),
+    handler: async ({ tenant, body }) => {
+      const ws = await c.infra.workspaces.findById(tenant.tenantId);
+      const appBase = c.config.appPublicUrl || 'http://localhost:18174';
+      const user = await c.infra.users.findById(tenant.userId);
+
+      const url = await c.stripeGateway.createCheckoutSession({
+        tenantId: tenant.tenantId,
+        workspaceName: ws?.name || 'SlotMatrix Workspace',
+        userEmail: user?.email,
+        plan: body.plan,
+        successUrl: `${appBase}?billing_success=true&plan=${body.plan}`,
+        cancelUrl: `${appBase}?billing_cancelled=true`,
+      });
+
+      return { checkoutUrl: url };
+    },
+  });
+
+  kit.add({
+    method: 'post',
+    path: '/billing/portal',
+    tag: 'Billing',
+    summary: 'Create Stripe Customer Billing Portal Session for self-service cancellation & plan change',
+    access: 'tenant',
+    minRole: 'ADMIN',
+    handler: async ({ tenant }) => {
+      const sub = await c.infra.subscriptions.findByTenant(tenant.tenantId);
+      const customerId = sub?.externalCustomerId;
+      if (!customerId) {
+        throw new NotFoundError('Nenhum customer do Stripe vinculado a este Workspace. Realize um checkout primeiro.');
+      }
+      const appBase = c.config.appPublicUrl || 'http://localhost:18174';
+      const url = await c.stripeGateway.createCustomerPortalSession({
+        customerId,
+        returnUrl: `${appBase}`,
+      });
+      return { portalUrl: url };
+    },
+  });
+
+  kit.add({
+    method: 'post',
+    path: '/webhooks/stripe',
+    tag: 'Billing',
+    summary: 'Official Stripe Webhook with cryptographic signature and idempotency (4 key events)',
+    access: 'public',
+    handler: async ({ req, rawBody }) => {
+      let eventPayload: any;
+      const stripeSig = req.header('stripe-signature');
+
+      if (c.stripeGateway.isConfigured() && stripeSig) {
+        try {
+          eventPayload = c.stripeGateway.verifyWebhookSignature(rawBody || '', stripeSig);
+        } catch (err: any) {
+          throw new UnauthorizedError(`Assinatura de Webhook do Stripe inválida: ${err.message}`);
+        }
+      } else {
+        if (!rawBody) throw new UnauthorizedError('Payload vazio');
+        eventPayload = JSON.parse(rawBody);
+      }
+
+      const command = c.acl.translate(eventPayload);
+      if (!command) return { status: 'ignored' };
+      const res = await c.billing.processWebhook.execute({ command, rawPayload: eventPayload });
+      return { received: true, ...res };
+    },
+  });
+
+  kit.add({
+    method: 'get',
+    path: '/admin/metrics',
+    tag: 'Admin',
+    summary: 'Admin SaaS Dashboard: MRR, active subscriptions, plan distribution & audit trail',
+    access: 'tenant',
+    minRole: 'ADMIN',
+    handler: async ({ tenant }) => {
+      const counts = await c.infra.subscriptions.countByPlanAndStatus();
+
+      let mrrCents = 0;
+      let activeCount = 0;
+      const byPlan: Record<string, { total: number; active: number }> = {
+        STARTER: { total: 0, active: 0 },
+        PRO: { total: 0, active: 0 },
+        ENTERPRISE: { total: 0, active: 0 },
+      };
+
+      for (const item of counts) {
+        if (!byPlan[item.plan]) byPlan[item.plan] = { total: 0, active: 0 };
+        byPlan[item.plan].total += item.count;
+        if (item.status === 'ACTIVE' || item.status === 'TRIALING') {
+          byPlan[item.plan].active += item.count;
+          activeCount += item.count;
+          if (item.status === 'ACTIVE') {
+            if (item.plan === 'PRO') mrrCents += item.count * 34900;
+            if (item.plan === 'ENTERPRISE') mrrCents += item.count * 89000;
+          }
+        }
+      }
+
+      const recentLogs = await c.infra.auditLogs.listByTenant(tenant.tenantId, 15);
+
+      return {
+        mrrCents,
+        mrrFormatted: `R$ ${(mrrCents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+        activeSubscriptionsCount: activeCount,
+        distribution: byPlan,
+        recentLogs,
+      };
+    },
+  });
+
   // ---------- Public Self-Booking Portal (/public/book/:slug)
   kit.add({
     method: 'get',

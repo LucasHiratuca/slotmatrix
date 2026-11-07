@@ -23,6 +23,9 @@ export interface AppEnvironment {
   jwtSecret: string;
   billingWebhookSecret: string;
   allowLocalWebhooks: boolean;
+  stripeSecretKey?: string;
+  stripeWebhookSecret?: string;
+  appPublicUrl: string;
 }
 
 export function loadEnv(): AppEnvironment {
@@ -35,6 +38,10 @@ export function loadEnv(): AppEnvironment {
     billingWebhookSecret:
       process.env.BILLING_WEBHOOK_SECRET ?? 'whsec_slotmatrix_billing_secret_2026',
     allowLocalWebhooks: process.env.ALLOW_LOCAL_WEBHOOKS === 'true',
+    stripeSecretKey: process.env.STRIPE_SECRET_KEY,
+    stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+    appPublicUrl:
+      process.env.APP_PUBLIC_URL ?? process.env.CATALOG_PUBLIC_URL ?? 'http://localhost:18174',
   };
 }
 

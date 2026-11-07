@@ -53,6 +53,9 @@ services:
       REDIS_URL: redis://slotmatrix_redis:6379
       JWT_SECRET: slotmatrix-production-grade-secret-key-2026
       BILLING_WEBHOOK_SECRET: whsec_slotmatrix_billing_secret_2026
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:18174}
       AUTO_SEED: "true"
     ports:
       - "18081:18081"
@@ -79,6 +82,9 @@ services:
       REDIS_URL: redis://slotmatrix_redis:6379
       JWT_SECRET: slotmatrix-production-grade-secret-key-2026
       BILLING_WEBHOOK_SECRET: whsec_slotmatrix_billing_secret_2026
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:18174}
     networks:
       - slotmatrix_net
 

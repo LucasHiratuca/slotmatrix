@@ -158,4 +158,138 @@ describe('HTTP Presentation Layer, RBAC, Public Portal & Multi-Tenant Isolation'
       .set('x-workspace-id', seeded.auraWorkspaceId)
       .expect(404);
   });
+
+  it('manages recurring billing lifecycle: checkout, webhook transitions, customer portal and admin SaaS dashboard metrics', async () => {
+    const { c } = makeHarness();
+    const seeded = await seedDemoData(c);
+    const app = createApp(c);
+
+    // 1. Login as Aura Owner
+    const auraLogin = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'owner@aura.test', password: 'Passw0rd!' })
+      .expect(200);
+    const auraToken = auraLogin.body.token as string;
+
+    // 2. Request Stripe Checkout Session for PRO plan
+    const checkoutRes = await request(app)
+      .post('/api/billing/checkout')
+      .set('Authorization', `Bearer ${auraToken}`)
+      .set('x-workspace-id', seeded.auraWorkspaceId)
+      .send({ plan: 'PRO' })
+      .expect(200);
+
+    expect(checkoutRes.body.checkoutUrl).toBeDefined();
+
+    // 3. Webhook: checkout.session.completed -> Upgrades Estúdio Aura to PRO with customer id
+    const checkoutEvent = JSON.stringify({
+      id: 'evt_stripe_checkout_aura_pro',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          customer: 'cus_stripe_aura_test_1',
+          metadata: {
+            workspace_id: seeded.auraWorkspaceId,
+            plan: 'PRO',
+          },
+        },
+      },
+    });
+
+    const webRes1 = await request(app)
+      .post('/api/webhooks/stripe')
+      .set('Content-Type', 'application/json')
+      .send(checkoutEvent)
+      .expect(200);
+
+    expect(webRes1.body.received).toBe(true);
+    expect(webRes1.body.status).toBe('processed');
+
+    // 4. Now that Aura is on PRO, the 6th resource creation that was previously rejected with 402 succeeds!
+    const resourceRes = await request(app)
+      .post('/api/resources')
+      .set('Authorization', `Bearer ${auraToken}`)
+      .set('x-workspace-id', seeded.auraWorkspaceId)
+      .send({
+        name: 'Cabine 06 Pro Exclusiva',
+        category: 'ROOM',
+        capabilities: ['HIGIENE_FACIAL'],
+      })
+      .expect(201);
+
+    expect(resourceRes.body.id).toBeDefined();
+
+    // 5. Customer Portal Session creation for self-service
+    const portalRes = await request(app)
+      .post('/api/billing/portal')
+      .set('Authorization', `Bearer ${auraToken}`)
+      .set('x-workspace-id', seeded.auraWorkspaceId)
+      .expect(200);
+
+    expect(portalRes.body.portalUrl).toBeDefined();
+
+    // 6. Webhook: invoice.payment_failed -> marks subscription PAST_DUE
+    const failEvent = JSON.stringify({
+      id: 'evt_stripe_invoice_fail_aura',
+      type: 'invoice.payment_failed',
+      data: {
+        object: {
+          customer: 'cus_stripe_aura_test_1',
+        },
+      },
+    });
+
+    await request(app)
+      .post('/api/webhooks/stripe')
+      .set('Content-Type', 'application/json')
+      .send(failEvent)
+      .expect(200);
+
+    const subAfterFail = await c.infra.subscriptions.findByTenant(seeded.auraWorkspaceId);
+    expect(subAfterFail?.status).toBe('PAST_DUE');
+
+    // 7. Webhook: customer.subscription.deleted -> resets workspace back to STARTER
+    const cancelEvent = JSON.stringify({
+      id: 'evt_stripe_cancel_aura',
+      type: 'customer.subscription.deleted',
+      data: {
+        object: {
+          customer: 'cus_stripe_aura_test_1',
+        },
+      },
+    });
+
+    await request(app)
+      .post('/api/webhooks/stripe')
+      .set('Content-Type', 'application/json')
+      .send(cancelEvent)
+      .expect(200);
+
+    const subAfterCancel = await c.infra.subscriptions.findByTenant(seeded.auraWorkspaceId);
+    expect(subAfterCancel?.status).toBe('CANCELED');
+    expect(subAfterCancel?.plan).toBe('STARTER');
+
+    // 8. Admin SaaS Dashboard: MRR and subscription distribution
+    const metricsRes = await request(app)
+      .get('/api/admin/metrics')
+      .set('Authorization', `Bearer ${auraToken}`)
+      .set('x-workspace-id', seeded.auraWorkspaceId)
+      .expect(200);
+
+    expect(metricsRes.body.mrrFormatted).toBeDefined();
+    expect(metricsRes.body.distribution).toBeDefined();
+    expect(metricsRes.body.recentLogs).toBeDefined();
+
+    // 9. Non-admin (SPECIALIST) cannot access Admin metrics
+    const specLogin = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'spec@vitascan.test', password: 'Passw0rd!' })
+      .expect(200);
+
+    await request(app)
+      .get('/api/admin/metrics')
+      .set('Authorization', `Bearer ${specLogin.body.token}`)
+      .set('x-workspace-id', seeded.vitascanWorkspaceId)
+      .expect(403);
+  });
 });
