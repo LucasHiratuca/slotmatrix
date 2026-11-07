@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .bg-buffer-stripes {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      rgba(245, 158, 11, 0.22),
+      rgba(245, 158, 11, 0.22) 6px,
+      rgba(245, 158, 11, 0.06) 6px,
+      rgba(245, 158, 11, 0.06) 12px
+    );
+  }
+}

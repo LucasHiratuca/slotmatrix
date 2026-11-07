@@ -1,34 +1,6 @@
-# Dependências do Node
 node_modules/
-
-# Vendor (bibliotecas copiadas localmente - não committar)
-**/public/vendor/
-
-# Variáveis de Ambiente (Senhas e Chaves - NUNCA committar)
-.env
-.env.*
-!.env.example
-
-# Logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Build / Cache
 dist/
-.cache/
-.tmp/
-
-# Arquivos do Sistema Operacional
+*.tsbuildinfo
+.env
+coverage/
 .DS_Store
-Thumbs.db
-desktop.ini
-
-# Editor
-.vscode/settings.json
-.idea/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln

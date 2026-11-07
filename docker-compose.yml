@@ -1,113 +1,105 @@
 services:
-  catalogo-service:
-    build: ./catalogo-service
-    image: lucashiratuca/catalogo-service:latest
-    container_name: catalogo_service
-    restart: always
+  slotmatrix_db:
+    image: mariadb:11.4
+    container_name: slotmatrix_db
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: slotmatrix_root
+      MARIADB_DATABASE: slotmatrix
+      MARIADB_USER: slotmatrix
+      MARIADB_PASSWORD: slotmatrix
     ports:
-      - "8217:3000"
-    env_file:
-      - .env
-    environment:
-      - AUTH_SERVICE_URL=http://auth-service:4000
-      - CATALOG_PUBLIC_URL=http://localhost:8217
-      - LOG_SERVICE_URL=http://log-service:5000
-      - S3_ENDPOINT=garage:3900
-      - S3_ACCESS_KEY=GK9ae6ab4a2d12a3227b1a0d9a
-      - S3_SECRET_KEY=f46bb999a2d2615ad200369932ccff5454f113c74c4614e6027dc2380dcc5632
-      - S3_BUCKET=perfis
-      - S3_REGION=garage
-      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
-      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY:-}
-      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
-      - STRIPE_PRICE_ID=${STRIPE_PRICE_ID:-}
+      - "13308:3306"
+    volumes:
+      - slotmatrix_db_data:/var/lib/mysql
     networks:
-      - app_network
-    depends_on:
-      - auth-service
-      - log-service
-      - garage
+      - slotmatrix_net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
-  auth-service:
-    build: ./auth-service
-    image: lucashiratuca/auth-service:latest
-    container_name: auth_service
-    restart: always
-    env_file:
-      - .env
-    environment:
-      - LOG_SERVICE_URL=http://log-service:5000
-    networks:
-      - app_network
-    depends_on:
-      - log-service
-
-  log-service:
-    build: ./log-service
-    image: lucashiratuca/log-service:latest
-    container_name: log_service
-    restart: always
-    env_file:
-      - .env
-    environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-    networks:
-      - app_network
-    depends_on:
-      - redis
-
-  redis:
+  slotmatrix_redis:
     image: redis:7-alpine
-    container_name: redis_audit
-    restart: always
-    networks:
-      - app_network
-    volumes:
-      - redis_data:/data
-
-  # ==============================================================================
-  # OBJECT STORAGE: Garage S3 (Ativo) / MinIO (Compatível S3)
-  # ------------------------------------------------------------------------------
-  # O projeto utiliza Garage S3 (engine moderna em Rust compatível com AWS S3 / MinIO API).
-  # Caso deseje alternar para MinIO, basta substituir pelo serviço abaixo:
-  #
-  # minio:
-  #   image: cgr.dev/chainguard/minio:latest
-  #   container_name: minio_perfis
-  #   restart: always
-  #   ports:
-  #     - "9000:9000"
-  #     - "9001:9001"
-  #   environment:
-  #     MINIO_ROOT_USER: minioadmin
-  #     MINIO_ROOT_PASSWORD: minioadmin
-  #   command: server /data --console-address ":9001"
-  #   volumes:
-  #     - minio_data:/data
-  #   networks:
-  #     - app_network
-  # ==============================================================================
-  garage:
-    image: dxflrs/garage:v1.0.1
-    container_name: garage_s3
-    restart: always
+    container_name: slotmatrix_redis
+    restart: unless-stopped
     ports:
-      - "3900:3900" # S3 API
-      - "3902:3902" # S3 Web
-      - "3903:3903" # Admin API
+      - "16381:6379"
     volumes:
-      - ./garage.toml:/etc/garage.toml:ro
-      - garage_meta:/var/lib/garage/meta
-      - garage_data:/var/lib/garage/data
+      - slotmatrix_redis_data:/data
     networks:
-      - app_network
+      - slotmatrix_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
-networks:
-  app_network:
-    driver: bridge
+  slotmatrix_api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: slotmatrix_api
+    restart: unless-stopped
+    depends_on:
+      slotmatrix_db:
+        condition: service_healthy
+      slotmatrix_redis:
+        condition: service_healthy
+    environment:
+      PORT: 18081
+      DATABASE_URL: mysql://slotmatrix:slotmatrix@slotmatrix_db:3306/slotmatrix
+      REDIS_URL: redis://slotmatrix_redis:6379
+      JWT_SECRET: slotmatrix-production-grade-secret-key-2026
+      BILLING_WEBHOOK_SECRET: whsec_slotmatrix_billing_secret_2026
+      AUTO_SEED: "true"
+    ports:
+      - "18081:18081"
+    networks:
+      - slotmatrix_net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:18081/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  slotmatrix_worker:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: slotmatrix_worker
+    restart: unless-stopped
+    command: ["npx", "tsx", "src/main-worker.ts"]
+    depends_on:
+      slotmatrix_api:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: mysql://slotmatrix:slotmatrix@slotmatrix_db:3306/slotmatrix
+      REDIS_URL: redis://slotmatrix_redis:6379
+      JWT_SECRET: slotmatrix-production-grade-secret-key-2026
+      BILLING_WEBHOOK_SECRET: whsec_slotmatrix_billing_secret_2026
+    networks:
+      - slotmatrix_net
+
+  slotmatrix_web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: slotmatrix_web
+    restart: unless-stopped
+    depends_on:
+      slotmatrix_api:
+        condition: service_healthy
+    ports:
+      - "18174:80"
+    networks:
+      - slotmatrix_net
 
 volumes:
-  redis_data:
-  garage_meta:
-  garage_data:
+  slotmatrix_db_data:
+  slotmatrix_redis_data:
+
+networks:
+  slotmatrix_net:
+    driver: bridge
