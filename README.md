@@ -3,6 +3,7 @@
 > **ISW055 · Atividade 9 · Fork e Plano de Negócio**  
 > **ISW055 · Atividade 10 · Seu Negócio no Ar (Transição de Domínio)**  
 > **ISW055 · Atividade 11 · Assinatura recorrente (SaaS completo — planos, limites e assinatura com Stripe)**  
+> **ISW055 · P2 · Avaliação Bimestral Consolidada (Relatório de Arquitetura e Atividades 7 a 11):** [docs/P2_ISW055_Lucas_Hiratuca.pdf](docs/P2_ISW055_Lucas_Hiratuca.pdf)  
 > **Orientador:** Professor [@siriani](https://github.com/siriani)  
 > **Autor:** Lucas Tetsuya Hiratuca  
 > **Repositório do Produto:** [LucasHiratuca/slotmatrix](https://github.com/LucasHiratuca/slotmatrix)  
