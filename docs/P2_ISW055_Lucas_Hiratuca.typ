@@ -295,7 +295,7 @@ O sistema conta com um conjunto completo de ferramentas de observabilidade e doc
 )[
   *O que foi feito.* Implementação do modelo de monetização no catálogo cinematográfico por meio da integração oficial do Stripe em modo de teste. Foi configurado o produto "Plano Premium — Catálogo Tom Hanks" (R\$ 9,90/mês). Desenvolveu-se a rota `POST /checkout` criando uma `Checkout Session` oficial com redirecionamento seguro para a página da Stripe, e o endpoint assíncrono `POST /webhook/stripe` com validação de assinatura criptográfica via `STRIPE_WEBHOOK_SECRET`. Como benefício real verificável, foi criado o limite rígido de 15 favoritos para usuários gratuitos, liberando favoritos ilimitados e selo dourado nos comentários para assinantes premium. Nenhum número de cartão de crédito trafega ou reside no banco de dados local.
 
-  #evidencia([Atividade 7 — evidência da entrega (Checkout Stripe em modo de teste com cartão 4242)], arquivo: "prints/ativ7_evidencia.png")
+  #evidencia([Atividade 7 — evidência da entrega (terminal git log do commit db428bf)], arquivo: "prints/ativ7_evidencia.png")
   #evidencia([Atividade 7 — resultado (usuário promovido a Premium no banco com favoritos ilimitados)], arquivo: "prints/ativ7_resultado.png")
 
   *Dificuldades e como foram resolvidas.* A principal dificuldade residiu na detecção correta da URL pública do host em containers Docker para os redirecionamentos de retorno (`success_url` e `cancel_url`), resolvida implementando lógica dinâmica de leitura do cabeçalho `Host` da requisição HTTP.
@@ -305,14 +305,14 @@ O sistema conta com um conjunto completo de ferramentas de observabilidade e doc
   8, "SaaS, PaaS, IaaS — e a documentação que o projeto nunca teve",
   descricao: "Camadas de nuvem do próprio projeto e documentação reversa: especificação, arquitetura, regras de negócio e modelo de dados.",
   planejada: "16/10/2026",
-  realizada: "16/10/2026 18:30",
+  realizada: "07/11/2026 11:51",
   situacao: "entregue",
   evidencia-desc: "GitHub — commit 4873502 + DOCUMENTACAO.md linkado no README",
   url: "https://github.com/LucasHiratuca/Entrega-da-Atividade/blob/main/DOCUMENTACAO.md",
 )[
   *O que foi feito.* Elaboração da documentação reversa técnica e arquitetural de todo o sistema legado construído no primeiro ciclo de desenvolvimento. O documento cobriu a especificação funcional de cada módulo, o diagrama de arquitetura em microsserviços (Big Picture em Mermaid), o catálogo exaustivo de 25 regras de negócio extraídas diretamente do código ("Se X, então Y"), o modelo de dados híbrido (MariaDB, MinIO/Garage S3 e Redis Streams) e a classificação justificada de cada componente nas camadas IaaS, PaaS e SaaS. O arquivo `DOCUMENTACAO.md` foi comitado na raiz do repositório e integrado ao `README.md`.
 
-  #evidencia([Atividade 8 — evidência da entrega (commit 4873502 e criação do DOCUMENTACAO.md)], arquivo: "prints/ativ8_evidencia.png")
+  #evidencia([Atividade 8 — evidência da entrega (terminal git log do commit 4873502)], arquivo: "prints/ativ8_evidencia.png")
   #evidencia([Atividade 8 — resultado (estrutura dos 5 capítulos de documentação reversa no GitHub)], arquivo: "prints/ativ8_resultado.png")
 
   *Dificuldades e como foram resolvidas.* Mapear com precisão cirúrgica 25 regras de negócio implícitas em middlewares e tratamentos de erro exigiu leitura minuciosa de cada arquivo do projeto, transformando comportamentos de código em regras formais auditáveis.
@@ -322,14 +322,14 @@ O sistema conta com um conjunto completo de ferramentas de observabilidade e doc
   9, "Fork e plano de negócio",
   descricao: "Repositório novo com o histórico do anterior, README do produto (dor, persona, Lean Canvas, modelo de receita, mapa de reaproveitamento) e backlog em issues.",
   planejada: "23/10/2026",
-  realizada: "23/10/2026 15:40",
+  realizada: "07/11/2026 12:24",
   situacao: "entregue",
   evidencia-desc: "GitHub — issue de entrega (\@siriani) + repositório novo + README do produto + histórico espelhado",
   url: "https://github.com/LucasHiratuca/slotmatrix",
 )[
   *O que foi feito.* Transição formal do catálogo de filmes para um modelo de negócio B2B autêntico: o *SlotMatrix*. O repositório original foi espelhado via terminal (`git clone --bare` + `git push --mirror`) para o novo repositório `LucasHiratuca/slotmatrix`, preservando integralmente 31 commits históricos. No `README.md`, foi estruturado o plano de negócio completo: a dor real de centros diagnósticos e cirúrgicos (conflitos de salas e no-show de 20%), a persona (Dra. Renata Silveira, diretora clínica), a proposta de valor de alocação atômica multi-recurso, a precificação preliminar (Starter, Pro R\$ 349/mês, Enterprise R\$ 890/mês), o Lean Canvas em 9 blocos e o mapa detalhado de reaproveitamento de toda a arquitetura de microsserviços. Foram criadas 5 issues no backlog do GitHub mapeando o roadmap de desenvolvimento.
 
-  #evidencia([Atividade 9 — evidência da entrega (issue de entrega mencionando \@siriani e repo espelhado)], arquivo: "prints/ativ9_evidencia.png")
+  #evidencia([Atividade 9 — evidência da entrega (terminal git log do commit 8af43af)], arquivo: "prints/ativ9_evidencia.png")
   #evidencia([Atividade 9 — resultado (README do produto com plano de negócio e Lean Canvas)], arquivo: "prints/ativ9_resultado.png")
 
   *Dificuldades e como foram resolvidas.* A formulação de uma dor de negócio genuína e específica exigiu pesquisas de mercado no setor médico para definir custos reais de ociosidade sanitária e índices estatísticos de faltas em clínicas diagnósticas.
@@ -339,14 +339,14 @@ O sistema conta com um conjunto completo de ferramentas de observabilidade e doc
   10, "Seu negócio no ar — o domínio no lugar dos filmes",
   descricao: "Stack apontando para o repositório novo, tabelas e API do domínio, papéis do negócio, isolamento por usuário, eventos no log, upload e landing page.",
   planejada: "06/11/2026",
-  realizada: "06/11/2026 21:15",
+  realizada: "07/11/2026 12:28",
   situacao: "entregue",
   evidencia-desc: "GitHub — issue de entrega (\@siriani) + commit 0cc74c6 + URL no ar + prints da landing e do 403",
   url: "https://github.com/LucasHiratuca/slotmatrix/commit/0cc74c6",
 )[
   *O que foi feito.* Substituição completa da lógica de filmes pelas entidades e casos de uso do SlotMatrix na mesma stack do Portainer e sob a mesma infraestrutura. Foram implementados os 4 Bounded Contexts em DDD (`tenancy`, `catalog`, `scheduling`, `billing`), o mecanismo de alocação atômica com bloqueio pessimista (`SELECT ... FOR UPDATE`) respeitando tempos de higienização de salas (`TurnaroundBuffer`), a fila de espera inteligente (Smart Waitlist) com ofertas temporizadas gerenciadas por workers BullMQ no Redis, o isolamento multi-tenant por workspace, a documentação Swagger OpenAPI 3.0 e a verificação estrita de papéis RBAC respondendo `HTTP 403 Forbidden` quando um especialista tenta cadastrar recursos no catálogo.
 
-  #evidencia([Atividade 10 — evidência da entrega (commit 0cc74c6 e stack Portainer ativa com 5 containers)], arquivo: "prints/ativ10_evidencia.png")
+  #evidencia([Atividade 10 — evidência da entrega (terminal git log do commit 0cc74c6)], arquivo: "prints/ativ10_evidencia.png")
   #evidencia([Atividade 10 — resultado (painel operacional com grade multi-recurso e teste de RBAC 403)], arquivo: "prints/ativ10_resultado.png")
 
   *Dificuldades e como foram resolvidas.* Implementar o bloqueio atômico simultâneo de três categorias distintas de recursos (Médico, Sala e Equipamento) sem provocar deadlocks exigiu ordenar deterministicamente as chaves de alocação antes da aquisição de locks nas transações SQL.
@@ -363,7 +363,7 @@ O sistema conta com um conjunto completo de ferramentas de observabilidade e doc
 )[
   *O que foi feito.* Implementação completa do ciclo de vida de assinaturas recorrentes via Stripe Subscriptions. Foram configurados os planos Starter (R\$ 0 / Grátis), Pro (R\$ 349/mês) e Enterprise (R\$ 890/mês). Desenvolveu-se a rota `POST /api/billing/checkout` gerando sessões com `mode='subscription'`, a rota `POST /api/billing/portal` para autoatendimento no Stripe Customer Portal, e a rota de webhooks `POST /api/webhooks/stripe` tratando de forma idempotente os 4 eventos fundamentais (`checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`). Os limites de cota foram amarrados no backend: no plano Starter, o sistema rejeita a criação do 6º recurso com `HTTP 402 QuotaExceededError`, desbloqueando para 20 recursos após upgrade. Foi criado o endpoint `GET /api/admin/metrics` e o painel administrativo exibindo o cálculo em tempo real do faturamento mensal recorrente (MRR). A suíte com 40 testes automatizados foi 100% aprovada.
 
-  #evidencia([Atividade 11 — evidência da entrega (commit 31567de e suíte de 40 testes aprovada)], arquivo: "prints/ativ11_evidencia.png")
+  #evidencia([Atividade 11 — evidência da entrega (terminal git log do commit 31567de)], arquivo: "prints/ativ11_evidencia.png")
   #evidencia([Atividade 11 — resultado (painel de faturamento com Stripe, dashboard de MRR e bloqueio 402)], arquivo: "prints/ativ11_resultado.png")
 
   *Dificuldades e como foram resolvidas.* A garantia de idempotência para suportar reenvios de webhooks da Stripe sem gerar inconsistências financeiras ou duplicidade de eventos foi solucionada persistindo os IDs únicos de evento (`externalEventId`) no MariaDB antes da execução transacional dos agregados de subscrição.
