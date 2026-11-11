@@ -135,7 +135,7 @@ As atividades 7 e 8 foram desenvolvidas e consolidadas no repositório inicial d
 
 Na Atividade 9, em estrito cumprimento às instruções metodológicas, o repositório original foi espelhado para um novo repositório dedicado exclusivamente ao produto (`LucasHiratuca/slotmatrix`) por meio dos comandos `git clone --bare` seguido de `git push --mirror`. Essa técnica preservou 100% da integridade do grafo de histórico (31 commits anteriores desde agosto), permitindo a continuidade direta do trabalho sem quebra de rastreabilidade.
 
-Nas Atividades 10 e 11, o SaaS evoluiu na mesma stack do Portainer e sob a mesma infraestrutura de contêineres na máquina virtual da Fatec, aproveitando as instâncias do MariaDB 11.4, Redis 7 e Object Storage S3. A metodologia de desenvolvimento combinou TypeScript estruturado em Domain-Driven Design (DDD), testes automatizados integrados com Vitest, documentação interativa OpenAPI 3.0 (Swagger) e front-end responsivo em React 18 / Vite.
+Nas Atividades 10 e 11, o SaaS evoluiu na mesma stack do Portainer e sob a mesma infraestrutura de contêineres na máquina virtual da Fatec, aproveitando as instâncias do MariaDB 11.4 e Redis 7 (enquanto o Object Storage S3 utilizado na P1 ficou restrito ao sistema legado do catálogo). A metodologia de desenvolvimento combinou TypeScript estruturado em Domain-Driven Design (DDD), testes automatizados integrados com Vitest, documentação interativa OpenAPI 3.0 (Swagger) e front-end responsivo em React 18 / Vite.
 
 Todas as datas e horários apresentados no Quadro de Entregas foram extraídos diretamente do histórico criptográfico do Git (`git log`), auditados nas páginas de commit do GitHub e registrados nas respectivas issues de entrega endereçadas ao professor `\@siriani`.
 
@@ -145,7 +145,7 @@ Todas as datas e horários apresentados no Quadro de Entregas foram extraídos d
 
 == Visão geral e componentes
 
-A arquitetura do *SlotMatrix* é composta por microsserviços desacoplados interligados por uma rede interna isolada no Docker (`slotmatrix_net`). Apenas a interface web SPA (`slotmatrix_web`) e a API HTTP (`slotmatrix_api`) expõem portas para o host, enquanto o banco relacional, o broker Redis e o storage S3 permanecem inacessíveis para o tráfego externo direto.
+A arquitetura do *SlotMatrix* é composta por microsserviços desacoplados interligados por uma rede interna isolada no Docker (`slotmatrix_net`). Apenas a interface web SPA (`slotmatrix_web`) e a API HTTP (`slotmatrix_api`) expõem portas para o host, enquanto o banco relacional e o broker Redis permanecem inacessíveis para o tráfego externo direto.
 
 #evidencia([Diagrama de componentes e microsserviços do SaaS], arquivo: "prints/fig1_arquitetura.png")
 
@@ -158,7 +158,6 @@ A arquitetura do *SlotMatrix* é composta por microsserviços desacoplados inter
   [slotmatrix_worker], [Processamento em segundo plano e expiração de ofertas de waitlist], [Node.js 20 + BullMQ], [Não (interno)],
   [slotmatrix_db], [Persistência transacional multi-tenant, quotas de planos e auditoria], [MariaDB 11.4], [Não (:3306 int.)],
   [slotmatrix_redis], [Fila BullMQ para expiração temporizada e Redis Streams de auditoria], [Redis 7 Alpine], [Não (:6379 int.)],
-  [MinIO / S3], [Armazenamento seguro de laudos, guias médicas e comprovantes], [MinIO / Garage S3], [Não (:9000 int.)],
   [Stripe (externo)], [Checkout de assinaturas recorrentes, portal do cliente e webhooks], [Serviço SaaS externo], [Webhook → API],
 )
 
@@ -259,7 +258,7 @@ O sistema conta com um conjunto completo de ferramentas de observabilidade e doc
   fill: (x, y) => if y == 0 { luma(235) } else { none },
   table.header([*Camada*], [*O que é no seu projeto*], [*Quem gerencia*]),
   [IaaS], [Máquina Virtual Proxmox / Ubuntu Server na infraestrutura da Fatec Pompeia (CPU, memória RAM, interfaces de rede e armazenamento em disco).], [Professor e equipe de infraestrutura da Fatec],
-  [PaaS], [Ambiente de orquestração Docker Engine e Portainer; containers gerenciados do MariaDB 11.4, Redis 7 Alpine e Object Storage MinIO/Garage S3.], [Aluno (desenvolvedor / administrador da stack)],
+  [PaaS], [Ambiente de orquestração Docker Engine e Portainer; containers gerenciados do MariaDB 11.4 e Redis 7 Alpine.], [Aluno (desenvolvedor / administrador da stack)],
   [SaaS], [O próprio software SlotMatrix entregue aos gestores clínicos; e os serviços de nuvem externos consumidos por API (Stripe Checkout e GitHub).], [Stripe Inc., GitHub e Aluno (provedor do SlotMatrix)],
 )
 
@@ -289,7 +288,7 @@ O sistema conta com um conjunto completo de ferramentas de observabilidade e doc
   descricao: "Plano pago em modo de teste: Checkout Session do Stripe e webhook marcando o usuário como premium.",
   planejada: "09/10/2026",
   realizada: "10/10/2026 12:06",
-  situacao: "entregue",
+  situacao: "entregue com atraso",
   evidencia-desc: "GitHub — commit db428bf + print do checkout concluído e do usuário premium",
   url: "https://github.com/LucasHiratuca/Entrega-da-Atividade/commit/db428bf",
 )[
@@ -298,7 +297,7 @@ O sistema conta com um conjunto completo de ferramentas de observabilidade e doc
   #evidencia([Atividade 7 — evidência da entrega (terminal git log do commit db428bf)], arquivo: "prints/ativ7_evidencia.png")
   #evidencia([Atividade 7 — resultado (usuário promovido a Premium no banco com favoritos ilimitados)], arquivo: "prints/ativ7_resultado.png")
 
-  *Dificuldades e como foram resolvidas.* A principal dificuldade residiu na detecção correta da URL pública do host em containers Docker para os redirecionamentos de retorno (`success_url` e `cancel_url`), resolvida implementando lógica dinâmica de leitura do cabeçalho `Host` da requisição HTTP.
+  *Dificuldades e como foram resolvidas.* A principal dificuldade residiu na detecção correta da URL pública do host em containers Docker para os redirecionamentos de retorno (`success_url` e `cancel_url`), resolvida implementando lógica dinâmica de leitura do cabeçalho `Host` da requisição HTTP (o ajuste final ocasionou 1 dia de atraso no commit em relação à data planejada).
 ]
 
 #atividade(
@@ -306,16 +305,16 @@ O sistema conta com um conjunto completo de ferramentas de observabilidade e doc
   descricao: "Camadas de nuvem do próprio projeto e documentação reversa: especificação, arquitetura, regras de negócio e modelo de dados.",
   planejada: "16/10/2026",
   realizada: "07/11/2026 11:51",
-  situacao: "entregue",
+  situacao: "entregue com atraso",
   evidencia-desc: "GitHub — commit 4873502 + DOCUMENTACAO.md linkado no README",
   url: "https://github.com/LucasHiratuca/Entrega-da-Atividade/blob/main/DOCUMENTACAO.md",
 )[
   *O que foi feito.* Elaboração da documentação reversa técnica e arquitetural de todo o sistema legado construído no primeiro ciclo de desenvolvimento. O documento cobriu a especificação funcional de cada módulo, o diagrama de arquitetura em microsserviços (Big Picture em Mermaid), o catálogo exaustivo de 25 regras de negócio extraídas diretamente do código ("Se X, então Y"), o modelo de dados híbrido (MariaDB, MinIO/Garage S3 e Redis Streams) e a classificação justificada de cada componente nas camadas IaaS, PaaS e SaaS. O arquivo `DOCUMENTACAO.md` foi comitado na raiz do repositório e integrado ao `README.md`.
 
   #evidencia([Atividade 8 — evidência da entrega (terminal git log do commit 4873502)], arquivo: "prints/ativ8_evidencia.png")
-  #evidencia([Atividade 8 — resultado (estrutura dos 5 capítulos de documentação reversa no GitHub)], arquivo: "prints/ativ8_resultado.png")
+  #evidencia([Atividade 8 — resultado (DOCUMENTACAO.md aberto no GitHub)], arquivo: "prints/ativ8_resultado.png")
 
-  *Dificuldades e como foram resolvidas.* Mapear com precisão cirúrgica 25 regras de negócio implícitas em middlewares e tratamentos de erro exigiu leitura minuciosa de cada arquivo do projeto, transformando comportamentos de código em regras formais auditáveis.
+  *Dificuldades e como foram resolvidas.* Mapear com precisão cirúrgica 25 regras de negócio implícitas em middlewares e tratamentos de erro exigiu leitura minuciosa de cada arquivo do projeto, transformando comportamentos de código em regras formais auditáveis, motivo pelo qual a formalização em commit ocorreu com atraso junto à consolidação do segundo bimestre.
 ]
 
 #atividade(
@@ -323,16 +322,16 @@ O sistema conta com um conjunto completo de ferramentas de observabilidade e doc
   descricao: "Repositório novo com o histórico do anterior, README do produto (dor, persona, Lean Canvas, modelo de receita, mapa de reaproveitamento) e backlog em issues.",
   planejada: "23/10/2026",
   realizada: "07/11/2026 12:24",
-  situacao: "entregue",
+  situacao: "entregue com atraso",
   evidencia-desc: "GitHub — issue de entrega (\@siriani) + repositório novo + README do produto + histórico espelhado",
   url: "https://github.com/LucasHiratuca/slotmatrix",
 )[
-  *O que foi feito.* Transição formal do catálogo de filmes para um modelo de negócio B2B autêntico: o *SlotMatrix*. O repositório original foi espelhado via terminal (`git clone --bare` + `git push --mirror`) para o novo repositório `LucasHiratuca/slotmatrix`, preservando integralmente 31 commits históricos. No `README.md`, foi estruturado o plano de negócio completo: a dor real de centros diagnósticos e cirúrgicos (conflitos de salas e no-show de 20%), a persona (Dra. Renata Silveira, diretora clínica), a proposta de valor de alocação atômica multi-recurso, a precificação preliminar (Starter, Pro R\$ 349/mês, Enterprise R\$ 890/mês), o Lean Canvas em 9 blocos e o mapa detalhado de reaproveitamento de toda a arquitetura de microsserviços. Foram criadas 5 issues no backlog do GitHub mapeando o roadmap de desenvolvimento.
+  *O que foi feito.* Transição formal do catálogo de filmes para um modelo de negócio B2B autêntico: o *SlotMatrix*. O repositório original foi espelhado via terminal (`git clone --bare` + `git push --mirror`) para o novo repositório `LucasHiratuca/slotmatrix`, preservando integralmente 31 commits históricos. No `README.md`, foi estruturado o plano de negócio completo: a dor real de centros diagnósticos e cirúrgicos (conflitos de salas e no-show de 20%), a persona (Dra. Renata Silveira, diretora clínica), a proposta de valor de alocação atômica multi-recurso, a precificação preliminar (Starter, Pro R\$ 349/mês, Enterprise R\$ 890/mês), o Lean Canvas em 9 blocos e o mapa detalhado de reaproveitamento de toda a arquitetura de microsserviços. O roadmap de 5 marcos do desenvolvimento foi estruturado no `README.md` e consolidado na Issue de entrega `#1` no repositório novo.
 
   #evidencia([Atividade 9 — evidência da entrega (terminal git log do commit 8af43af)], arquivo: "prints/ativ9_evidencia.png")
-  #evidencia([Atividade 9 — resultado (README do produto com plano de negócio e Lean Canvas)], arquivo: "prints/ativ9_resultado.png")
+  #evidencia([Atividade 9 — resultado (página inicial do repositório slotmatrix no GitHub com README atualizado)], arquivo: "prints/ativ9_resultado.png")
 
-  *Dificuldades e como foram resolvidas.* A formulação de uma dor de negócio genuína e específica exigiu pesquisas de mercado no setor médico para definir custos reais de ociosidade sanitária e índices estatísticos de faltas em clínicas diagnósticas.
+  *Dificuldades e como foram resolvidas.* A formulação de uma dor de negócio genuína e específica exigiu pesquisas de mercado no setor médico para definir custos reais de ociosidade sanitária e índices estatísticos de faltas em clínicas diagnósticas; o commit de transição foi concluído em atraso em paralelo ao desenvolvimento do núcleo do SaaS.
 ]
 
 #atividade(
@@ -340,7 +339,7 @@ O sistema conta com um conjunto completo de ferramentas de observabilidade e doc
   descricao: "Stack apontando para o repositório novo, tabelas e API do domínio, papéis do negócio, isolamento por usuário, eventos no log, upload e landing page.",
   planejada: "06/11/2026",
   realizada: "07/11/2026 12:28",
-  situacao: "entregue",
+  situacao: "entregue com atraso",
   evidencia-desc: "GitHub — issue de entrega (\@siriani) + commit 0cc74c6 + URL no ar + prints da landing e do 403",
   url: "https://github.com/LucasHiratuca/slotmatrix/commit/0cc74c6",
 )[
@@ -349,7 +348,7 @@ O sistema conta com um conjunto completo de ferramentas de observabilidade e doc
   #evidencia([Atividade 10 — evidência da entrega (terminal git log do commit 0cc74c6)], arquivo: "prints/ativ10_evidencia.png")
   #evidencia([Atividade 10 — resultado (painel operacional com grade multi-recurso e teste de RBAC 403)], arquivo: "prints/ativ10_resultado.png")
 
-  *Dificuldades e como foram resolvidas.* Implementar o bloqueio atômico simultâneo de três categorias distintas de recursos (Médico, Sala e Equipamento) sem provocar deadlocks exigiu ordenar deterministicamente as chaves de alocação antes da aquisição de locks nas transações SQL.
+  *Dificuldades e como foram resolvidas.* Implementar o bloqueio atômico simultâneo de três categorias distintas de recursos (Médico, Sala e Equipamento) sem provocar deadlocks exigiu ordenar deterministicamente as chaves de alocação antes da aquisição de locks nas transações SQL, o que gerou 1 dia de atraso para finalizar os testes de integração.
 ]
 
 #atividade(
