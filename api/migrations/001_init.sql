@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS bookings (
   price_cents INT NOT NULL,
   currency VARCHAR(8) NOT NULL DEFAULT 'BRL',
   deposit_cents INT NOT NULL,
-  deposit_status ENUM('NOT_REQUIRED', 'PENDING', 'PAID', 'PARTIALLY_REFUNDED', 'REFUNDED', 'RETAINED') NOT NULL,
+  deposit_status ENUM('NOT_REQUIRED', 'PENDING', 'PAID', 'REFUNDED', 'PARTIALLY_RETAINED', 'FORFEITED', 'PARTIALLY_REFUNDED', 'RETAINED') NOT NULL,
   deposit_expires_at DATETIME(3) NULL,
   cancellation_policy_json JSON NOT NULL,
   retained_cents INT NOT NULL DEFAULT 0,
