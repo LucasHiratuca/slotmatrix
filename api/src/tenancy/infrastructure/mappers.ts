@@ -38,14 +38,34 @@ export interface UserRow {
   email: string;
   name: string;
   password_hash: string;
+  reset_token_hash?: string | null;
+  reset_token_expires_at?: Date | null;
   created_at: Date;
 }
 
 export const UserMapper = {
   toDomain(r: UserRow): User {
-    return User.reconstitute({ email: r.email, name: r.name, passwordHash: r.password_hash, createdAt: r.created_at }, UniqueEntityId.from(r.id));
+    return User.reconstitute(
+      {
+        email: r.email,
+        name: r.name,
+        passwordHash: r.password_hash,
+        resetTokenHash: r.reset_token_hash ?? null,
+        resetTokenExpiresAt: r.reset_token_expires_at ? new Date(r.reset_token_expires_at) : null,
+        createdAt: r.created_at,
+      },
+      UniqueEntityId.from(r.id),
+    );
   },
   toPersistence(u: User): UserRow {
-    return { id: u.id.value, email: u.email, name: u.name, password_hash: u.passwordHash, created_at: u.createdAt };
+    return {
+      id: u.id.value,
+      email: u.email,
+      name: u.name,
+      password_hash: u.passwordHash,
+      reset_token_hash: u.resetTokenHash ?? null,
+      reset_token_expires_at: u.resetTokenExpiresAt ?? null,
+      created_at: u.createdAt,
+    };
   },
 };

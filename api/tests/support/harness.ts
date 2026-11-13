@@ -1,6 +1,7 @@
 import { buildContainer, Container } from '../../src/composition-root';
 import {
   buildInMemoryInfrastructure,
+  InMemoryEmailGateway,
   InMemoryInfrastructure,
   MutableClock,
   RecordingNotificationGateway,
@@ -8,19 +9,26 @@ import {
 import { signBillingPayload } from '../../src/billing/infrastructure/BillingWebhookAcl';
 
 export const BILLING_SECRET = 'test-slotmatrix-billing-secret';
+export const STRIPE_WEBHOOK_SECRET = 'whsec_test_slotmatrix_stripe_secret';
 
 export interface Harness {
   infra: InMemoryInfrastructure;
   c: Container;
   clock: MutableClock;
   notifications: RecordingNotificationGateway;
+  emails: InMemoryEmailGateway;
 }
 
-export function makeHarness(): Harness {
+export function makeHarness(overrides: Partial<Parameters<typeof buildContainer>[1]> = {}): Harness {
   const clock = new MutableClock(new Date('2026-06-01T10:00:00Z'));
   const infra = buildInMemoryInfrastructure({ clock });
-  const c = buildContainer(infra, { billingWebhookSecret: BILLING_SECRET });
-  return { infra, c, clock, notifications: infra.notifications };
+  const c = buildContainer(infra, {
+    ...overrides,
+    billingWebhookSecret: overrides.billingWebhookSecret ?? BILLING_SECRET,
+    stripeWebhookSecret: overrides.stripeWebhookSecret ?? STRIPE_WEBHOOK_SECRET,
+    enableApiDocs: overrides.enableApiDocs ?? true,
+  });
+  return { infra, c, clock, notifications: infra.notifications, emails: infra.emails };
 }
 
 let seq = 0;

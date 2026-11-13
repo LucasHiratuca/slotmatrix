@@ -7,10 +7,12 @@ import { ForbiddenError, TenantAccessDeniedError, UnauthorizedError } from '../.
 import { Role } from '../../tenancy/domain/events/tenancy-events';
 
 type Access = 'public' | 'user' | 'tenant';
-const RANK: Record<Role, number> = { SPECIALIST: 1, COORDINATOR: 2, ADMIN: 3, OWNER: 4 };
+export const ROLE_RANK: Record<Role, number> = { SPECIALIST: 1, COORDINATOR: 2, ADMIN: 3, OWNER: 4 };
+export const SESSION_COOKIE_NAME = 'slotmatrix_session';
 
 export interface HandlerArgs {
   req: Request;
+  res: Response;
   userId: string;
   tenant: TenantContext;
   body: any;
@@ -38,6 +40,26 @@ declare module 'express-serve-static-core' {
   }
 }
 
+export function extractAuthToken(req: Request): string | undefined {
+  const h = req.header('authorization');
+  if (h?.startsWith('Bearer ')) {
+    const bearer = h.slice(7).trim();
+    if (bearer) return bearer;
+  }
+  const cookieHeader = req.header('cookie');
+  if (!cookieHeader) return undefined;
+  for (const part of cookieHeader.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq === -1) continue;
+    const key = part.slice(0, eq).trim();
+    if (key === SESSION_COOKIE_NAME) {
+      const val = part.slice(eq + 1).trim();
+      return val ? decodeURIComponent(val) : undefined;
+    }
+  }
+  return undefined;
+}
+
 export class RouterKit {
   readonly router = Router();
   readonly defs: RouteDef[] = [];
@@ -50,17 +72,17 @@ export class RouterKit {
         let userId = '';
         let tenant = undefined as unknown as TenantContext;
         if (def.access !== 'public') {
-          userId = this.authenticate(req);
+          userId = await this.authenticate(req);
           if (def.access === 'tenant') {
             tenant = await this.resolveTenant(req, userId);
-            if (def.minRole && RANK[tenant.role] < RANK[def.minRole]) {
+            if (def.minRole && ROLE_RANK[tenant.role] < ROLE_RANK[def.minRole]) {
               throw new ForbiddenError(`Requires role ${def.minRole} or higher`);
             }
           }
         }
         const body = def.body ? def.body.parse(req.body ?? {}) : req.body;
         const query = def.query ? def.query.parse(req.query) : req.query;
-        const out = await def.handler({ req, userId, tenant, body, query, params: req.params, rawBody: req.rawBody });
+        const out = await def.handler({ req, res, userId, tenant, body, query, params: req.params, rawBody: req.rawBody });
         res.status(def.successStatus ?? 200);
         if (out === undefined) res.end();
         else res.json(out);
@@ -70,15 +92,17 @@ export class RouterKit {
     });
   }
 
-  private authenticate(req: Request): string {
-    const h = req.header('authorization');
-    const token = h?.startsWith('Bearer ') ? h.slice(7) : undefined;
+  async authenticate(req: Request): Promise<string> {
+    const token = extractAuthToken(req);
     const p = token ? this.c.infra.tokens.verify(token) : null;
     if (!p) throw new UnauthorizedError('Missing or invalid bearer token');
+    if (p.jti && (await this.c.infra.tokens.isRevoked?.(p.jti))) {
+      throw new UnauthorizedError('Session token has been revoked');
+    }
     return p.userId;
   }
 
-  private async resolveTenant(req: Request, userId: string): Promise<TenantContext> {
+  async resolveTenant(req: Request, userId: string): Promise<TenantContext> {
     const tenantId = req.header('x-workspace-id');
     if (!tenantId) throw new TenantAccessDeniedError('x-workspace-id header is required');
     const ws = await this.c.infra.workspaces.findById(tenantId);

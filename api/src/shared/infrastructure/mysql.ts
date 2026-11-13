@@ -32,18 +32,27 @@ export class Database {
     if (this.als.getStore()) {
       return work();
     }
-    const conn = await this.pool.getConnection();
-    try {
-      await conn.beginTransaction();
-      const res = await this.als.run(conn, work);
-      await conn.commit();
-      return res;
-    } catch (e) {
-      await conn.rollback();
-      throw e;
-    } finally {
-      conn.release();
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const conn = await this.pool.getConnection();
+      try {
+        await conn.beginTransaction();
+        const res = await this.als.run(conn, work);
+        await conn.commit();
+        return res;
+      } catch (e: any) {
+        await conn.rollback().catch(() => undefined);
+        const isDeadlock = e?.code === 'ER_LOCK_DEADLOCK' || e?.errno === 1213;
+        if (isDeadlock && attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, 15 * attempt));
+          continue;
+        }
+        throw e;
+      } finally {
+        conn.release();
+      }
     }
+    throw new Error('Transaction failed after retries');
   }
 
   public async ping(): Promise<boolean> {

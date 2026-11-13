@@ -5,6 +5,19 @@ export interface IUserRepository {
   findById(id: string): Promise<User | null>;
   findByEmail(email: string): Promise<User | null>;
   findByIds(ids: string[]): Promise<User[]>;
+  findByResetTokenHash(tokenHash: string): Promise<User | null>;
+}
+
+export interface PasswordResetEmailPayload {
+  toEmail: string;
+  userName: string;
+  resetToken: string;
+  resetUrl: string;
+  expiresAt: Date;
+}
+
+export interface IEmailGateway {
+  sendPasswordResetEmail(payload: PasswordResetEmailPayload): Promise<void>;
 }
 
 export interface AuditLogEntry {

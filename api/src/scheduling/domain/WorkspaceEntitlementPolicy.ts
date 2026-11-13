@@ -13,4 +13,5 @@ export interface WorkspaceEntitlements {
 
 export interface WorkspaceEntitlementPolicy {
   forWorkspace(tenantId: string): Promise<WorkspaceEntitlements>;
+  lockForQuotaCheck?(tenantId: string): Promise<void>;
 }

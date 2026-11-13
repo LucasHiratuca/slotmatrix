@@ -19,7 +19,8 @@ export interface SeedResult {
  *    - 4 RBAC members (`OWNER`, `ADMIN`, `COORDINATOR`, `SPECIALIST`)
  *    - 6 BookableResources (2 Specialists, 2 Rooms, 2 Equipments)
  *    - 2 Multi-resource ServiceProcedures with asymmetric room sterilization buffers (`cleanupMinutes: 20`) and `SecurityDeposit`
- *    - Confirmed bookings on the timeline, 1 cancelled booking with retained deposit penalty, 1 booking recovered from waitlist,
+ *    - Confirmed bookings on the timeline in local São Paulo business hours (09:00, 10:00, 11:00 local = 12:00Z, 13:00Z, 14:00Z),
+ *      1 cancelled booking with retained deposit penalty, 1 booking recovered from waitlist,
  *      and 3 WAITING `WaitlistEntry` patients ready so cancelling a booking immediately triggers a `SlotOffer`.
  */
 export async function seedDemoData(c: Container): Promise<SeedResult> {
@@ -42,7 +43,7 @@ export async function seedDemoData(c: Container): Promise<SeedResult> {
   // =========================================================================
   const auraReg = await c.tenancy.register.execute({
     email: 'owner@aura.test',
-    name: 'Clara Mendes (Aura Owner)',
+    name: 'Clara Mendes',
     password: 'Passw0rd!',
     workspaceName: 'Estúdio Aura',
   });
@@ -84,7 +85,7 @@ export async function seedDemoData(c: Container): Promise<SeedResult> {
   // =========================================================================
   const vitaReg = await c.tenancy.register.execute({
     email: 'owner@vitascan.test',
-    name: 'Dr. Ricardo Vasconcelos (Owner)',
+    name: 'Dra. Renata Silveira',
     password: 'Passw0rd!',
     workspaceName: 'VitaScan Diagnósticos',
   });
@@ -93,9 +94,9 @@ export async function seedDemoData(c: Container): Promise<SeedResult> {
 
   // Register extra team users and invite them into VitaScan with ADMIN, COORDINATOR, SPECIALIST roles
   const extraUsers = [
-    { email: 'admin@vitascan.test', name: 'Fernanda Lima (Admin)', role: 'ADMIN' as const },
-    { email: 'coord@vitascan.test', name: 'Marcos Azevedo (Coordinator)', role: 'COORDINATOR' as const },
-    { email: 'spec@vitascan.test', name: 'Dra. Camila Rocha (Specialist)', role: 'SPECIALIST' as const },
+    { email: 'admin@vitascan.test', name: 'Marcos Vasconcelos', role: 'ADMIN' as const },
+    { email: 'coord@vitascan.test', name: 'Helena Prado', role: 'COORDINATOR' as const },
+    { email: 'spec@vitascan.test', name: 'Dra. Camila Rocha', role: 'SPECIALIST' as const },
   ];
 
   for (const u of extraUsers) {
@@ -103,7 +104,7 @@ export async function seedDemoData(c: Container): Promise<SeedResult> {
       email: u.email,
       name: u.name,
       password: 'Passw0rd!',
-      workspaceName: `${u.name} Personal`,
+      workspaceName: `${u.name} Consultório`,
     });
     await c.tenancy.invite.execute({
       tenantId: vitaId,
@@ -208,20 +209,30 @@ export async function seedDemoData(c: Container): Promise<SeedResult> {
     ],
   });
 
-  // Base date: Next Monday (or tomorrow if weekday) in UTC within 08:00 - 18:00 Mon-Sat window
+  // Base date: Hoje no fuso horário de São Paulo (America/Sao_Paulo, UTC-3), em horário comercial local (09:00 às 14:00 locais = 12:00Z às 17:00Z)
   const now = c.infra.clock.now();
-  const baseDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+  const spParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const spY = Number(spParts.find((p) => p.type === 'year')?.value ?? now.getUTCFullYear());
+  const spM = Number(spParts.find((p) => p.type === 'month')?.value ?? now.getUTCMonth() + 1);
+  const spD = Number(spParts.find((p) => p.type === 'day')?.value ?? now.getUTCDate());
+  const baseDate = new Date(Date.UTC(spY, spM - 1, spD, 0, 0, 0));
   if (baseDate.getUTCDay() === 0) {
-    // Advance from Sunday to Monday so all resources are inside their Mon-Sat working window
     baseDate.setUTCDate(baseDate.getUTCDate() + 1);
   }
 
-  const slot0900 = new Date(baseDate.getTime() + 9 * 3600_000); // 09:00 - 09:40 (Room occupied until 10:00!)
-  const slot1000 = new Date(baseDate.getTime() + 10 * 3600_000); // 10:00 - 10:40 (Room occupied until 11:00!)
-  const slot1100 = new Date(baseDate.getTime() + 11 * 3600_000); // 11:00 - 12:00 (Laser procedure)
-  const slot1400 = new Date(baseDate.getTime() + 14 * 3600_000); // 14:00 - 14:40
+  const slot0900 = new Date(baseDate.getTime() + 12 * 3600_000); // 09:00 - 09:40 local SP (12:00Z - 12:40Z; sala até 10:00 local)
+  const slot1000 = new Date(baseDate.getTime() + 13 * 3600_000); // 10:00 - 10:40 local SP (13:00Z - 13:40Z; sala até 11:00 local)
+  const slot1100 = new Date(baseDate.getTime() + 14 * 3600_000); // 11:00 - 12:00 local SP (14:00Z - 15:00Z; procedimento a laser)
+  const slot1400 = new Date(baseDate.getTime() + 17 * 3600_000); // 14:00 - 14:40 local SP (17:00Z - 17:40Z)
+  const desiredStart = new Date(baseDate.getTime() + 11 * 3600_000); // 08:00 local SP (11:00Z)
+  const desiredEnd = new Date(baseDate.getTime() + 21 * 3600_000); // 18:00 local SP (21:00Z)
 
-  // 1. Confirmed Booking at 09:00 (Ideal candidate to Cancel in the UI to trigger Waitlist Offer!)
+  // 1. Confirmed Booking at 09:00 local SP (Ideal candidate to Cancel in the UI to trigger Waitlist Offer!)
   const b1 = await c.scheduling.scheduleBooking.execute({
     tenantId: vitaId,
     procedureId: procDoppler.id.value,
@@ -234,11 +245,11 @@ export async function seedDemoData(c: Container): Promise<SeedResult> {
     bookingId: b1.id.value,
   });
 
-  // 2. Historical Late-Cancelled Booking at 14:00 demonstrating retained deposit penalty
+  // 2. Historical Late-Cancelled Booking at 14:00 local SP demonstrating retained deposit penalty
   const bCancelled = await c.scheduling.scheduleBooking.execute({
     tenantId: vitaId,
     procedureId: procDoppler.id.value,
-    clientName: 'Patrícia Nogueira (Cancelamento Tardio)',
+    clientName: 'Patrícia Nogueira',
     clientEmail: 'patricia@cliente.test',
     startAt: slot1400,
   });
@@ -253,22 +264,22 @@ export async function seedDemoData(c: Container): Promise<SeedResult> {
     reason: 'Desistência de última hora pela paciente',
   });
 
-  // 3. Waitlist Entry that was Offered & Claimed at 10:00 (Demonstrates Waitlist Recovered Revenue R$ 800,00)
+  // 3. Waitlist Entry that was Offered & Claimed at 10:00 local SP (Demonstrates Waitlist Recovered Revenue R$ 800,00)
   const wRecovered = await c.scheduling.joinWaitlist.execute({
     tenantId: vitaId,
     procedureId: procDoppler.id.value,
-    clientName: 'Juliana Paiva (Recuperada via Waitlist)',
+    clientName: 'Juliana Paiva',
     clientEmail: 'juliana.paiva@cliente.test',
-    desiredStartAt: new Date(baseDate.getTime() + 8 * 3600_000),
-    desiredEndAt: new Date(baseDate.getTime() + 17 * 3600_000),
+    desiredStartAt: desiredStart,
+    desiredEndAt: desiredEnd,
     priority: 'STANDARD',
   });
 
   const temp1000 = await c.scheduling.scheduleBooking.execute({
     tenantId: vitaId,
     procedureId: procDoppler.id.value,
-    clientName: 'Paciente Desistente 10h',
-    clientEmail: 'desistente10h@cliente.test',
+    clientName: 'Lucas Mendonça',
+    clientEmail: 'lucas.mendonca@cliente.test',
     startAt: slot1000,
   });
   await c.scheduling.confirmDeposit.execute({
@@ -279,7 +290,7 @@ export async function seedDemoData(c: Container): Promise<SeedResult> {
     tenantId: vitaId,
     bookingId: temp1000.id.value,
     actorId: vitaOwnerId,
-    reason: 'Imprevisto — liberando vaga para Smart Waitlist',
+    reason: 'Imprevisto familiar — liberando vaga para a lista de espera',
   });
 
   const claimed = await c.scheduling.claimWaitlistOffer.execute({
@@ -291,7 +302,7 @@ export async function seedDemoData(c: Container): Promise<SeedResult> {
     bookingId: claimed.booking.id.value,
   });
 
-  // 4. Confirmed Laser Booking at 11:00
+  // 4. Confirmed Laser Booking at 11:00 local SP
   const bLaser = await c.scheduling.scheduleBooking.execute({
     tenantId: vitaId,
     procedureId: procLaser.id.value,
@@ -304,14 +315,11 @@ export async function seedDemoData(c: Container): Promise<SeedResult> {
     bookingId: bLaser.id.value,
   });
 
-  // 5. Enqueue 3 WAITING patients for procDoppler covering the day window (08:00 - 17:00)
-  const desiredStart = new Date(baseDate.getTime() + 8 * 3600_000);
-  const desiredEnd = new Date(baseDate.getTime() + 17 * 3600_000);
-
+  // 5. Enqueue 3 WAITING patients for procDoppler covering the local day window (08:00 - 18:00 SP)
   await c.scheduling.joinWaitlist.execute({
     tenantId: vitaId,
     procedureId: procDoppler.id.value,
-    clientName: 'Beatriz Monteiro (#1 na Fila)',
+    clientName: 'Beatriz Monteiro',
     clientEmail: 'beatriz.monteiro@cliente.test',
     desiredStartAt: desiredStart,
     desiredEndAt: desiredEnd,
@@ -321,7 +329,7 @@ export async function seedDemoData(c: Container): Promise<SeedResult> {
   await c.scheduling.joinWaitlist.execute({
     tenantId: vitaId,
     procedureId: procDoppler.id.value,
-    clientName: 'Carlos Eduardo Silva (#2 na Fila - Cascata)',
+    clientName: 'Carlos Eduardo Silva',
     clientEmail: 'carlos.silva@cliente.test',
     desiredStartAt: desiredStart,
     desiredEndAt: desiredEnd,
@@ -331,7 +339,7 @@ export async function seedDemoData(c: Container): Promise<SeedResult> {
   await c.scheduling.joinWaitlist.execute({
     tenantId: vitaId,
     procedureId: procDoppler.id.value,
-    clientName: 'Mariana Tavares (#3 na Fila)',
+    clientName: 'Mariana Tavares',
     clientEmail: 'mariana.tavares@cliente.test',
     desiredStartAt: desiredStart,
     desiredEndAt: desiredEnd,

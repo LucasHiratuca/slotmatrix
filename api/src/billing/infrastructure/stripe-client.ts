@@ -32,6 +32,10 @@ export class StripeBillingGateway {
     return this.stripe !== null;
   }
 
+  hasWebhookSecret(): boolean {
+    return typeof this.webhookSecret === 'string' && this.webhookSecret.length >= 10;
+  }
+
   async createCheckoutSession(opts: CheckoutSessionOptions): Promise<string> {
     if (!this.stripe) {
       // Retorno para ambiente de desenvolvimento local sem chave configurada
@@ -90,12 +94,12 @@ export class StripeBillingGateway {
   }
 
   verifyWebhookSignature(rawBody: string, signature: string | undefined): Stripe.Event {
-    if (!this.stripe || !this.webhookSecret) {
-      throw new Error('Stripe ou Webhook Secret não configurado');
+    if (!this.webhookSecret) {
+      throw new Error('Stripe Webhook Secret não configurado');
     }
     if (!signature) {
       throw new Error('Cabeçalho stripe-signature ausente');
     }
-    return this.stripe.webhooks.constructEvent(rawBody, signature, this.webhookSecret);
+    return Stripe.webhooks.constructEvent(rawBody, signature, this.webhookSecret);
   }
 }

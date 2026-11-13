@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Infrastructure } from '../composition-root';
 import { Clock, UnitOfWork } from '../shared/application/ports';
 import { BcryptPasswordHasher, JwtTokenService } from '../shared/infrastructure/security';
@@ -14,7 +15,7 @@ import {
   WebhookChannelRow,
 } from '../scheduling/infrastructure/mappers';
 import { IWorkspaceRepository } from '../tenancy/domain/repositories/IWorkspaceRepository';
-import { AuditLogEntry, IAuditLogRepository, IUserRepository } from '../tenancy/application/ports';
+import { AuditLogEntry, IAuditLogRepository, IEmailGateway, IUserRepository, PasswordResetEmailPayload } from '../tenancy/application/ports';
 import { ISubscriptionRepository } from '../billing/domain/repositories/ISubscriptionRepository';
 import { IProcessedWebhookStore } from '../billing/application/ports';
 import { IBookableResourceRepository } from '../catalog/domain/repositories/IBookableResourceRepository';
@@ -33,9 +34,29 @@ import { WebhookChannel } from '../scheduling/domain/entities/WebhookChannel';
 import { TimeSlot } from '../scheduling/domain/value-objects/TimeSlot';
 import { ExistingResourceHold } from '../scheduling/domain/services/MultiResourceAvailabilityDomainService';
 
+/**
+ * Unit of Work em memória com semântica transacional serial:
+ * Enfileira execuções para simular commits atômicos e isolamento em testes concorrentes.
+ */
 export class InMemoryUnitOfWork implements UnitOfWork {
-  run<T>(work: () => Promise<T>): Promise<T> {
-    return work();
+  private queue: Promise<void> = Promise.resolve();
+  private readonly als = new AsyncLocalStorage<boolean>();
+
+  async run<T>(work: () => Promise<T>): Promise<T> {
+    if (this.als.getStore()) {
+      return work();
+    }
+    const prev = this.queue;
+    let release!: () => void;
+    this.queue = new Promise<void>((res) => {
+      release = res;
+    });
+    await prev;
+    try {
+      return await this.als.run(true, work);
+    } finally {
+      release();
+    }
   }
 }
 
@@ -52,6 +73,10 @@ export class InMemoryUserRepository implements IUserRepository {
   async findById(id: string) { const r = this.rows.get(id); return r ? UserMapper.toDomain(r) : null; }
   async findByEmail(email: string) { const r = [...this.rows.values()].find((x) => x.email === email); return r ? UserMapper.toDomain(r) : null; }
   async findByIds(ids: string[]) { return ids.map((i) => this.rows.get(i)).filter(Boolean).map((r) => UserMapper.toDomain(r!)); }
+  async findByResetTokenHash(tokenHash: string) {
+    const r = [...this.rows.values()].find((x) => x.reset_token_hash === tokenHash);
+    return r ? UserMapper.toDomain(r) : null;
+  }
 }
 
 export class InMemoryWorkspaceRepository implements IWorkspaceRepository {
@@ -75,21 +100,22 @@ export class InMemorySubscriptionRepository implements ISubscriptionRepository {
   rows = new Map<string, SubscriptionRow>();
   async save(s: Subscription) { this.rows.set(s.tenantId.value, SubscriptionMapper.toPersistence(s)); }
   async findByTenant(t: string) { const r = this.rows.get(t); return r ? SubscriptionMapper.toDomain(r) : null; }
-  async findByExternalCustomerId(c: string) {
-    const r = [...this.rows.values()].find((x) => x.external_customer_id === c);
+  async findByExternalCustomerId(customerId: string) {
+    const r = [...this.rows.values()].find((x) => x.external_customer_id === customerId);
     return r ? SubscriptionMapper.toDomain(r) : null;
   }
-  async countByPlanAndStatus() {
-    const map = new Map<string, number>();
+  async countByPlanAndStatus(): Promise<{ plan: string; status: string; count: number }[]> {
+    const counts = new Map<string, number>();
     for (const r of this.rows.values()) {
-      const key = r.plan + ":" + r.status;
-      map.set(key, (map.get(key) || 0) + 1);
+      const key = `${r.plan}:${r.status}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
     }
-    return [...map.entries()].map(([k, count]) => {
+    return [...counts.entries()].map(([k, count]) => {
       const [plan, status] = k.split(':');
       return { plan, status, count };
     });
   }
+  async lockByTenant?(tenantId: string): Promise<void> {}
 }
 
 export class InMemoryBookableResourceRepository implements IBookableResourceRepository {
@@ -252,6 +278,13 @@ export class RecordingNotificationGateway implements INotificationGateway {
   }
 }
 
+export class InMemoryEmailGateway implements IEmailGateway {
+  sentEmails: PasswordResetEmailPayload[] = [];
+  async sendPasswordResetEmail(payload: PasswordResetEmailPayload): Promise<void> {
+    this.sentEmails.push({ ...payload });
+  }
+}
+
 export function buildInMemoryInfrastructure(opts: { clock?: Clock; jwtSecret?: string } = {}) {
   const infra = {
     uow: new InMemoryUnitOfWork(),
@@ -267,6 +300,7 @@ export function buildInMemoryInfrastructure(opts: { clock?: Clock; jwtSecret?: s
     auditLogs: new InMemoryAuditLogRepository(),
     processedWebhooks: new InMemoryProcessedWebhookStore(),
     notifications: new RecordingNotificationGateway(),
+    emails: new InMemoryEmailGateway(),
     hasher: new BcryptPasswordHasher(4),
     tokens: new JwtTokenService(opts.jwtSecret ?? 'test-secret'),
   };

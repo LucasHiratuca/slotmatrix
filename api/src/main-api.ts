@@ -19,15 +19,23 @@ async function bootstrap() {
     stripeSecretKey: env.stripeSecretKey,
     stripeWebhookSecret: env.stripeWebhookSecret,
     appPublicUrl: env.appPublicUrl,
+    isProduction: env.isProduction,
+    enableBillingSimulator: env.enableBillingSimulator,
+    enableApiDocs: env.enableApiDocs,
+    corsOrigins: env.corsOrigins,
   });
 
-  if (process.env.AUTO_SEED !== 'false') {
+  if (!env.isProduction && process.env.AUTO_SEED === 'true') {
     await seedDemoData(container);
+  } else if (env.isProduction && process.env.AUTO_SEED === 'true') {
+    console.warn('[Security] AUTO_SEED=true ignorado em NODE_ENV=production.');
   }
 
   const app = createApp(container);
   const server = app.listen(env.port, '0.0.0.0', () => {
-    console.log(`[SlotMatrix API] Listening on http://0.0.0.0:${env.port} (Swagger at /api/docs)`);
+    console.log(
+      `[SlotMatrix API] Listening on http://0.0.0.0:${env.port}${env.enableApiDocs ? ' (Swagger at /api/docs)' : ''}`,
+    );
   });
 
   const shutdown = async (signal: string) => {

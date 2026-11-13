@@ -47,6 +47,15 @@ export function domainExceptionFilter(err: unknown, _req: Request, res: Response
   if ((err as any)?.type === 'entity.parse.failed') {
     return res.status(400).json({ error: 'BAD_REQUEST', message: 'Malformed JSON' });
   }
+  if ((err as any)?.name === 'MulterError') {
+    return res.status(400).json({ error: 'BAD_REQUEST', message: 'Arquivo inválido ou acima do limite permitido (5 MB).' });
+  }
+  if ((err as any)?.code === 'ER_LOCK_DEADLOCK' || (err as any)?.errno === 1213 || (err as any)?.code === 'ER_LOCK_WAIT_TIMEOUT') {
+    return res.status(409).json({
+      error: 'CONCURRENCY_CONFLICT',
+      message: 'Conflito simultâneo de alocação detectado. Tente novamente em instantes.',
+    });
+  }
   console.error('[unhandled]', err);
   return res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Unexpected error' });
 }

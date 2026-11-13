@@ -5,6 +5,10 @@ import { WorkspaceEntitlementPolicy, WorkspaceEntitlements } from '../../schedul
 export class SubscriptionEntitlementPolicy implements WorkspaceEntitlementPolicy {
   constructor(private readonly subscriptions: ISubscriptionRepository) {}
 
+  async lockForQuotaCheck(tenantId: string): Promise<void> {
+    await this.subscriptions.lockByTenant?.(tenantId);
+  }
+
   async forWorkspace(tenantId: string): Promise<WorkspaceEntitlements> {
     const sub = await this.subscriptions.findByTenant(tenantId);
     if (!sub) {

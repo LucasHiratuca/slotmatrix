@@ -24,9 +24,17 @@ export interface PasswordHasher {
   verify(plain: string, hash: string): Promise<boolean>;
 }
 
+export interface VerifiedTokenPayload {
+  userId: string;
+  jti?: string;
+  exp?: number;
+}
+
 export interface AuthTokenService {
   sign(userId: string): string;
-  verify(token: string): { userId: string } | null;
+  verify(token: string): VerifiedTokenPayload | null;
+  revoke?(token: string): Promise<void> | void;
+  isRevoked?(jti: string): Promise<boolean> | boolean;
 }
 
 export interface TenantContext {

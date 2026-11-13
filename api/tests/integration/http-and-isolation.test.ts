@@ -1,6 +1,7 @@
 import request from 'supertest';
+import Stripe from 'stripe';
 import { describe, expect, it } from 'vitest';
-import { makeHarness } from '../support/harness';
+import { makeHarness, STRIPE_WEBHOOK_SECRET } from '../support/harness';
 import { createApp } from '../../src/presentation/http/app';
 import { seedDemoData } from '../../src/seed';
 import { signBillingPayload } from '../../src/billing/infrastructure/BillingWebhookAcl';
@@ -196,9 +197,22 @@ describe('HTTP Presentation Layer, RBAC, Public Portal & Multi-Tenant Isolation'
       },
     });
 
+    const checkoutSig = Stripe.webhooks.generateTestHeaderString({
+      payload: checkoutEvent,
+      secret: STRIPE_WEBHOOK_SECRET,
+    });
+
+    // Unsigned webhook must be rejected (fail-closed)
+    await request(app)
+      .post('/api/webhooks/stripe')
+      .set('Content-Type', 'application/json')
+      .send(checkoutEvent)
+      .expect(401);
+
     const webRes1 = await request(app)
       .post('/api/webhooks/stripe')
       .set('Content-Type', 'application/json')
+      .set('stripe-signature', checkoutSig)
       .send(checkoutEvent)
       .expect(200);
 
@@ -239,9 +253,15 @@ describe('HTTP Presentation Layer, RBAC, Public Portal & Multi-Tenant Isolation'
       },
     });
 
+    const failSig = Stripe.webhooks.generateTestHeaderString({
+      payload: failEvent,
+      secret: STRIPE_WEBHOOK_SECRET,
+    });
+
     await request(app)
       .post('/api/webhooks/stripe')
       .set('Content-Type', 'application/json')
+      .set('stripe-signature', failSig)
       .send(failEvent)
       .expect(200);
 
@@ -259,9 +279,15 @@ describe('HTTP Presentation Layer, RBAC, Public Portal & Multi-Tenant Isolation'
       },
     });
 
+    const cancelSig = Stripe.webhooks.generateTestHeaderString({
+      payload: cancelEvent,
+      secret: STRIPE_WEBHOOK_SECRET,
+    });
+
     await request(app)
       .post('/api/webhooks/stripe')
       .set('Content-Type', 'application/json')
+      .set('stripe-signature', cancelSig)
       .send(cancelEvent)
       .expect(200);
 

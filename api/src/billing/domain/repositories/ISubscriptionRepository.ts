@@ -11,4 +11,5 @@ export interface ISubscriptionRepository {
   findByTenant(tenantId: string): Promise<Subscription | null>;
   findByExternalCustomerId(customerId: string): Promise<Subscription | null>;
   countByPlanAndStatus(): Promise<PlanStatusCount[]>;
+  lockByTenant?(tenantId: string): Promise<void>;
 }

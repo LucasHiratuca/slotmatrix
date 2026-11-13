@@ -4,6 +4,6 @@ import { BookableResource } from '../aggregates/BookableResource';
 export interface IBookableResourceRepository {
   save(resource: BookableResource): Promise<void>;
   findById(tenantId: string, id: string): Promise<BookableResource | null>;
-  listByTenant(tenantId: string, opts?: { onlyActive?: boolean }): Promise<BookableResource[]>;
+  listByTenant(tenantId: string, opts?: { onlyActive?: boolean; forUpdate?: boolean }): Promise<BookableResource[]>;
   countActiveByTenant(tenantId: string): Promise<number>;
 }

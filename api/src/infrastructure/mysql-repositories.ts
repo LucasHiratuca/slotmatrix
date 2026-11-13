@@ -43,10 +43,14 @@ export class MySqlUserRepository implements IUserRepository {
   async save(u: User): Promise<void> {
     const r = UserMapper.toPersistence(u);
     await this.db.conn().execute(
-      `INSERT INTO users (id, email, name, password_hash, created_at)
-       VALUES (?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE name = VALUES(name), password_hash = VALUES(password_hash)`,
-      [r.id, r.email, r.name, r.password_hash, r.created_at],
+      `INSERT INTO users (id, email, name, password_hash, reset_token_hash, reset_token_expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         name = VALUES(name),
+         password_hash = VALUES(password_hash),
+         reset_token_hash = VALUES(reset_token_hash),
+         reset_token_expires_at = VALUES(reset_token_expires_at)`,
+      [r.id, r.email, r.name, r.password_hash, r.reset_token_hash ?? null, r.reset_token_expires_at ?? null, r.created_at],
     );
   }
 
@@ -69,6 +73,13 @@ export class MySqlUserRepository implements IUserRepository {
       .conn()
       .query<(UserRow & RowDataPacket)[]>(`SELECT * FROM users WHERE id IN (${ph})`, ids);
     return rows.map(UserMapper.toDomain);
+  }
+
+  async findByResetTokenHash(tokenHash: string): Promise<User | null> {
+    const [rows] = await this.db
+      .conn()
+      .query<(UserRow & RowDataPacket)[]>('SELECT * FROM users WHERE reset_token_hash = ? LIMIT 1', [tokenHash]);
+    return rows[0] ? UserMapper.toDomain(rows[0]) : null;
   }
 }
 
@@ -184,6 +195,15 @@ export class MySqlSubscriptionRepository implements ISubscriptionRepository {
     return rows[0] ? SubscriptionMapper.toDomain(rows[0]) : null;
   }
 
+  async lockByTenant(tenantId: string): Promise<void> {
+    await this.db
+      .conn()
+      .query<RowDataPacket[]>(
+        'SELECT id FROM subscriptions WHERE workspace_id = ? LIMIT 1 FOR UPDATE',
+        [tenantId],
+      );
+  }
+
   async findByExternalCustomerId(customerId: string): Promise<Subscription | null> {
     const [rows] = await this.db
       .conn()
@@ -249,10 +269,11 @@ export class MySqlBookableResourceRepository implements IBookableResourceReposit
     return rows[0] ? BookableResourceMapper.toDomain(rows[0]) : null;
   }
 
-  async listByTenant(tenantId: string, opts?: { onlyActive?: boolean }): Promise<BookableResource[]> {
+  async listByTenant(tenantId: string, opts?: { onlyActive?: boolean; forUpdate?: boolean }): Promise<BookableResource[]> {
+    const lock = opts?.forUpdate ? ' FOR UPDATE' : '';
     const sql = opts?.onlyActive
-      ? "SELECT * FROM bookable_resources WHERE workspace_id = ? AND status = 'ACTIVE' ORDER BY created_at ASC"
-      : 'SELECT * FROM bookable_resources WHERE workspace_id = ? ORDER BY created_at ASC';
+      ? `SELECT * FROM bookable_resources WHERE workspace_id = ? AND status = 'ACTIVE' ORDER BY id ASC${lock}`
+      : `SELECT * FROM bookable_resources WHERE workspace_id = ? ORDER BY id ASC${lock}`;
     const [rows] = await this.db.conn().query<(BookableResourceRow & RowDataPacket)[]>(sql, [tenantId]);
     return rows.map(BookableResourceMapper.toDomain);
   }
@@ -563,11 +584,12 @@ export class MySqlWaitlistRepository implements IWaitlistRepository {
     );
   }
 
-  async findById(tenantId: string, id: string): Promise<WaitlistEntry | null> {
+  async findById(tenantId: string, id: string, opts?: { forUpdate?: boolean }): Promise<WaitlistEntry | null> {
+    const lock = opts?.forUpdate ? ' FOR UPDATE' : '';
     const [rows] = await this.db
       .conn()
       .query<(WaitlistEntryRow & RowDataPacket)[]>(
-        'SELECT * FROM waitlist_entries WHERE id = ? AND workspace_id = ? LIMIT 1',
+        `SELECT * FROM waitlist_entries WHERE id = ? AND workspace_id = ? LIMIT 1${lock}`,
         [id, tenantId],
       );
     return rows[0] ? WaitlistEntryMapper.toDomain(rows[0]) : null;
@@ -593,10 +615,11 @@ export class MySqlWaitlistRepository implements IWaitlistRepository {
     return rows.map(WaitlistEntryMapper.toDomain);
   }
 
-  async listActiveOffersByTenant(tenantId: string, now: Date): Promise<WaitlistEntry[]> {
+  async listActiveOffersByTenant(tenantId: string, now: Date, opts?: { forUpdate?: boolean }): Promise<WaitlistEntry[]> {
+    const lock = opts?.forUpdate ? ' FOR UPDATE' : '';
     const [rows] = await this.db.conn().query<(WaitlistEntryRow & RowDataPacket)[]>(
       `SELECT * FROM waitlist_entries
-       WHERE workspace_id = ? AND status = 'OFFERED' AND offer_expires_at IS NOT NULL AND offer_expires_at > ?`,
+       WHERE workspace_id = ? AND status = 'OFFERED' AND offer_expires_at IS NOT NULL AND offer_expires_at > ?${lock}`,
       [tenantId, now],
     );
     return rows.map(WaitlistEntryMapper.toDomain);

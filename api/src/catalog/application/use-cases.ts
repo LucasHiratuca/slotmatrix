@@ -31,24 +31,24 @@ export class CreateBookableResourceUseCase {
     capabilities?: string[];
     weeklyWindows?: WeeklyWindow[];
   }): Promise<BookableResource> {
-    const [entitlements, currentActiveResourceCount] = await Promise.all([
-      this.d.entitlements.forWorkspace(input.tenantId),
-      this.d.resources.countActiveByTenant(input.tenantId),
-    ]);
-    registerSpec.assertSatisfiedBy({ entitlements, currentActiveResourceCount });
+    // Serializa verificação de cota e criação dentro da mesma transação (previne TOCTOU sob concorrência).
+    const { resource, events } = await this.d.uow.run(async () => {
+      await this.d.entitlements.lockForQuotaCheck?.(input.tenantId);
+      const entitlements = await this.d.entitlements.forWorkspace(input.tenantId);
+      const currentActiveResourceCount = await this.d.resources.countActiveByTenant(input.tenantId);
+      registerSpec.assertSatisfiedBy({ entitlements, currentActiveResourceCount });
 
-    const resource = BookableResource.create({
-      tenantId: TenantId.from(input.tenantId),
-      name: input.name,
-      category: input.category,
-      capabilities: input.capabilities,
-      weeklyWindows: input.weeklyWindows,
-      now: this.d.clock.now(),
-    });
+      const created = BookableResource.create({
+        tenantId: TenantId.from(input.tenantId),
+        name: input.name,
+        category: input.category,
+        capabilities: input.capabilities,
+        weeklyWindows: input.weeklyWindows,
+        now: this.d.clock.now(),
+      });
 
-    const events = await this.d.uow.run(async () => {
-      await this.d.resources.save(resource);
-      return resource.pullDomainEvents();
+      await this.d.resources.save(created);
+      return { resource: created, events: created.pullDomainEvents() };
     });
     await this.d.dispatcher.dispatch(events);
     return resource;
@@ -66,26 +66,31 @@ export class SetResourceMaintenanceBlockUseCase {
     reason?: string;
     status?: ResourceStatus;
   }): Promise<BookableResource> {
-    const resource = await this.d.resources.findById(input.tenantId, input.resourceId);
-    if (!resource) throw new NotFoundError('BookableResource not found');
-
-    if (input.status && input.status !== resource.status) {
+    return this.d.uow.run(async () => {
       if (input.status === 'ACTIVE') {
-        const [entitlements, currentActiveResourceCount] = await Promise.all([
-          this.d.entitlements.forWorkspace(input.tenantId),
-          this.d.resources.countActiveByTenant(input.tenantId),
-        ]);
-        registerSpec.assertSatisfiedBy({ entitlements, currentActiveResourceCount });
+        await this.d.entitlements.lockForQuotaCheck?.(input.tenantId);
       }
-      resource.setStatus(input.status);
-    }
+      const resource = await this.d.resources.findById(input.tenantId, input.resourceId);
+      if (!resource) throw new NotFoundError('BookableResource not found');
 
-    if (input.startAt && input.endAt) {
-      resource.addMaintenanceBlock(TimeSlot.create(input.startAt, input.endAt), input.reason ?? 'Scheduled maintenance');
-    }
+      if (input.status && input.status !== resource.status) {
+        if (input.status === 'ACTIVE') {
+          const [entitlements, currentActiveResourceCount] = await Promise.all([
+            this.d.entitlements.forWorkspace(input.tenantId),
+            this.d.resources.countActiveByTenant(input.tenantId),
+          ]);
+          registerSpec.assertSatisfiedBy({ entitlements, currentActiveResourceCount });
+        }
+        resource.setStatus(input.status);
+      }
 
-    await this.d.uow.run(() => this.d.resources.save(resource));
-    return resource;
+      if (input.startAt && input.endAt) {
+        resource.addMaintenanceBlock(TimeSlot.create(input.startAt, input.endAt), input.reason ?? 'Scheduled maintenance');
+      }
+
+      await this.d.resources.save(resource);
+      return resource;
+    });
   }
 }
 

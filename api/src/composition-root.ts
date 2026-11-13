@@ -1,7 +1,7 @@
 import { AuthTokenService, Clock, PasswordHasher, UnitOfWork } from './shared/application/ports';
 import { InProcessEventDispatcher } from './shared/application/InProcessEventDispatcher';
 import { WorkspaceReadService } from './shared/application/WorkspaceReadService';
-import { IAuditLogRepository, IUserRepository } from './tenancy/application/ports';
+import { IAuditLogRepository, IEmailGateway, IUserRepository } from './tenancy/application/ports';
 import { IWorkspaceRepository } from './tenancy/domain/repositories/IWorkspaceRepository';
 import { ISubscriptionRepository } from './billing/domain/repositories/ISubscriptionRepository';
 import { IBookableResourceRepository } from './catalog/domain/repositories/IBookableResourceRepository';
@@ -20,6 +20,8 @@ import {
   InviteWorkspaceMemberUseCase,
   LoginUseCase,
   RemoveWorkspaceMemberUseCase,
+  RequestPasswordResetUseCase,
+  ResetPasswordUseCase,
 } from './tenancy/application/use-cases';
 import { AUDITED_EVENTS, OnDomainEventAuditHandler } from './tenancy/application/audit-handler';
 import {
@@ -67,6 +69,7 @@ export interface Infrastructure {
   notifications: INotificationGateway;
   hasher: PasswordHasher;
   tokens: AuthTokenService;
+  emails: IEmailGateway;
 }
 
 export interface AppConfig {
@@ -75,6 +78,10 @@ export interface AppConfig {
   stripeSecretKey?: string;
   stripeWebhookSecret?: string;
   appPublicUrl?: string;
+  isProduction?: boolean;
+  enableBillingSimulator?: boolean;
+  enableApiDocs?: boolean;
+  corsOrigins?: string[];
 }
 
 export function buildContainer(infra: Infrastructure, config: AppConfig) {
@@ -92,6 +99,17 @@ export function buildContainer(infra: Infrastructure, config: AppConfig) {
       tokens: infra.tokens,
     }),
     login: new LoginUseCase({ users: infra.users, hasher: infra.hasher, tokens: infra.tokens }),
+    forgotPassword: new RequestPasswordResetUseCase({
+      users: infra.users,
+      emails: infra.emails,
+      clock: infra.clock,
+      appBaseUrl: config.appPublicUrl ?? config.selfBaseUrl,
+    }),
+    resetPassword: new ResetPasswordUseCase({
+      users: infra.users,
+      hasher: infra.hasher,
+      clock: infra.clock,
+    }),
     invite: new InviteWorkspaceMemberUseCase({ ...base, users: infra.users, workspaces: infra.workspaces }),
     changeRole: new ChangeMemberRoleUseCase({ ...base, workspaces: infra.workspaces }),
     removeMember: new RemoveWorkspaceMemberUseCase({ ...base, workspaces: infra.workspaces }),

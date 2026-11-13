@@ -5,12 +5,26 @@ const [host, port] = ENDPOINT.split(':');
 
 export const BUCKET_NAME = process.env.S3_BUCKET || 'slotmatrix-docs';
 
+function resolveS3Credentials(): { accessKey: string; secretKey: string } {
+  const accessKey = process.env.S3_ACCESS_KEY;
+  const secretKey = process.env.S3_SECRET_KEY;
+  if (process.env.NODE_ENV === 'production' && (!accessKey || !secretKey)) {
+    throw new Error('[Storage] S3_ACCESS_KEY e S3_SECRET_KEY são obrigatórios em NODE_ENV=production.');
+  }
+  return {
+    accessKey: accessKey || 'dev-s3-access-key-not-for-prod',
+    secretKey: secretKey || 'dev-s3-secret-key-not-for-prod',
+  };
+}
+
+const creds = resolveS3Credentials();
+
 export const minioClient = new Minio.Client({
   endPoint: host || 'localhost',
   port: parseInt(port || '3900', 10),
-  useSSL: false,
-  accessKey: process.env.S3_ACCESS_KEY || 'GK9ae6ab4a2d12a3227b1a0d9a',
-  secretKey: process.env.S3_SECRET_KEY || 'f46bb999a2d2615ad200369932ccff5454f113c74c4614e6027dc2380dcc5632',
+  useSSL: process.env.S3_USE_SSL === 'true',
+  accessKey: creds.accessKey,
+  secretKey: creds.secretKey,
   region: process.env.S3_REGION || 'garage',
   pathStyle: true,
 });

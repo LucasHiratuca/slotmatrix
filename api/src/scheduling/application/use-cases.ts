@@ -43,10 +43,12 @@ export async function collectActiveHolds(
   opts?: { forUpdate?: boolean; excludeWaitlistEntryId?: string; procedure?: { requirements: readonly { category: string; turnaround: { prepMinutes: number; cleanupMinutes: number } }[] } },
 ): Promise<ExistingResourceHold[]> {
   const expanded = searchWindow.expandWithBuffers(240, 240);
-  const [bookingHolds, activeOffers] = await Promise.all([
-    d.bookings.findActiveResourceHoldsInWindow(tenantId, expanded, now, { forUpdate: opts?.forUpdate }),
-    d.waitlist.listActiveOffersByTenant(tenantId, now),
-  ]);
+  const bookingHolds = await d.bookings.findActiveResourceHoldsInWindow(tenantId, expanded, now, {
+    forUpdate: opts?.forUpdate,
+  });
+  const activeOffers = await d.waitlist.listActiveOffersByTenant(tenantId, now, {
+    forUpdate: opts?.forUpdate,
+  });
 
   const holds: ExistingResourceHold[] = [...bookingHolds];
   for (const entry of activeOffers) {
@@ -75,39 +77,40 @@ export class ScheduleMultiResourceBookingUseCase {
     originWaitlistEntryId?: string;
   }): Promise<Booking> {
     const now = this.d.clock.now();
-    const [ent, procedure] = await Promise.all([
-      this.d.entitlements.forWorkspace(input.tenantId),
-      this.d.procedures.findById(input.tenantId, input.procedureId),
-    ]);
+    const procedure = await this.d.procedures.findById(input.tenantId, input.procedureId);
     if (!procedure) throw new NotFoundError('ServiceProcedure not found');
-    if (!ent.subscriptionHealthy) {
-      throw new QuotaExceededError('Subscription is not active: cannot schedule bookings');
-    }
-
-    if (ent.maxBookingsPerMonth !== null) {
-      const count = await this.d.bookings.countByTenantInMonth(
-        input.tenantId,
-        input.startAt.getUTCFullYear(),
-        input.startAt.getUTCMonth() + 1,
-      );
-      if (count >= ent.maxBookingsPerMonth) {
-        throw new QuotaExceededError(
-          `Monthly booking quota reached for plan ${ent.planLabel}: ${count}/${ent.maxBookingsPerMonth}`,
-        );
-      }
-    }
 
     const serviceSlot = TimeSlot.fromDuration(input.startAt, procedure.durationMinutes);
 
-    // Transação protegida contra condição de corrida (SELECT ... FOR UPDATE nas alocações sobrepostas)
+    // Transação protegida contra condição de corrida (lock de cota + SELECT ... FOR UPDATE determinístico nos recursos e alocações)
     const { booking, events } = await this.d.uow.run(async () => {
-      const [candidateResources, existingHolds] = await Promise.all([
-        this.d.resources.listByTenant(input.tenantId, { onlyActive: true }),
-        collectActiveHolds(this.d, input.tenantId, serviceSlot, now, {
-          forUpdate: true,
-          excludeWaitlistEntryId: input.originWaitlistEntryId,
-        }),
-      ]);
+      await this.d.entitlements.lockForQuotaCheck?.(input.tenantId);
+      const ent = await this.d.entitlements.forWorkspace(input.tenantId);
+      if (!ent.subscriptionHealthy) {
+        throw new QuotaExceededError('Subscription is not active: cannot schedule bookings');
+      }
+
+      if (ent.maxBookingsPerMonth !== null) {
+        const count = await this.d.bookings.countByTenantInMonth(
+          input.tenantId,
+          input.startAt.getUTCFullYear(),
+          input.startAt.getUTCMonth() + 1,
+        );
+        if (count >= ent.maxBookingsPerMonth) {
+          throw new QuotaExceededError(
+            `Monthly booking quota reached for plan ${ent.planLabel}: ${count}/${ent.maxBookingsPerMonth}`,
+          );
+        }
+      }
+
+      const candidateResources = await this.d.resources.listByTenant(input.tenantId, {
+        onlyActive: true,
+        forUpdate: true,
+      });
+      const existingHolds = await collectActiveHolds(this.d, input.tenantId, serviceSlot, now, {
+        forUpdate: true,
+        excludeWaitlistEntryId: input.originWaitlistEntryId,
+      });
 
       const allocResult = availabilitySvc.allocateResourcesForSlot({
         procedure,
@@ -247,33 +250,34 @@ export class ClaimWaitlistOfferUseCase {
 
   async execute(input: { tenantId: string; waitlistEntryId: string }): Promise<{ entry: WaitlistEntry; booking: Booking }> {
     const now = this.d.clock.now();
-    const entry = await this.d.waitlist.findById(input.tenantId, input.waitlistEntryId);
-    if (!entry) throw new NotFoundError('WaitlistEntry not found');
-    const offer = entry.activeOffer;
-    if (!offer || entry.status !== 'OFFERED') {
-      // Delega para o próprio agregado lançar InvalidStateTransitionError semântico
-      entry.claimOffer('none', now);
-      throw new NotFoundError('No active offer');
-    }
-    // Valida expiração antes mesmo de alocar
-    if (now.getTime() > offer.expiresAt.getTime()) {
-      entry.claimOffer('none', now);
-    }
 
-    const [ent, procedure] = await Promise.all([
-      this.d.entitlements.forWorkspace(input.tenantId),
-      this.d.procedures.findById(input.tenantId, entry.procedureId.value),
-    ]);
-    if (!procedure) throw new NotFoundError('ServiceProcedure not found');
+    const { entry, booking, events } = await this.d.uow.run(async () => {
+      await this.d.entitlements.lockForQuotaCheck?.(input.tenantId);
+      const entryRow = await this.d.waitlist.findById(input.tenantId, input.waitlistEntryId, { forUpdate: true });
+      if (!entryRow) throw new NotFoundError('WaitlistEntry not found');
+      const offer = entryRow.activeOffer;
+      if (!offer || entryRow.status !== 'OFFERED') {
+        // Delega para o próprio agregado lançar InvalidStateTransitionError semântico
+        entryRow.claimOffer('none', now);
+        throw new NotFoundError('No active offer');
+      }
+      // Valida expiração antes mesmo de alocar
+      if (now.getTime() > offer.expiresAt.getTime()) {
+        entryRow.claimOffer('none', now);
+      }
 
-    const { booking, events } = await this.d.uow.run(async () => {
-      const [candidateResources, existingHolds] = await Promise.all([
-        this.d.resources.listByTenant(input.tenantId, { onlyActive: true }),
-        collectActiveHolds(this.d, input.tenantId, offer.offeredSlot, now, {
-          forUpdate: true,
-          excludeWaitlistEntryId: entry.id.value,
-        }),
-      ]);
+      const ent = await this.d.entitlements.forWorkspace(input.tenantId);
+      const procedure = await this.d.procedures.findById(input.tenantId, entryRow.procedureId.value);
+      if (!procedure) throw new NotFoundError('ServiceProcedure not found');
+
+      const candidateResources = await this.d.resources.listByTenant(input.tenantId, {
+        onlyActive: true,
+        forUpdate: true,
+      });
+      const existingHolds = await collectActiveHolds(this.d, input.tenantId, offer.offeredSlot, now, {
+        forUpdate: true,
+        excludeWaitlistEntryId: entryRow.id.value,
+      });
 
       const alloc = availabilitySvc.allocateResourcesForSlot({
         procedure,
@@ -300,24 +304,25 @@ export class ClaimWaitlistOfferUseCase {
         tenantId: TenantId.from(input.tenantId),
         procedureId: procedure.id,
         procedureName: procedure.name,
-        clientName: entry.clientName,
-        clientEmail: entry.clientEmail,
+        clientName: entryRow.clientName,
+        clientEmail: entryRow.clientEmail,
         serviceSlot: offer.offeredSlot,
         allocations: finalAlloc.allocations,
         priceCents: procedure.price.amountCents,
         depositAmount: procedure.depositAmount,
         requireDepositPayment: ent.securityDepositEnabled && procedure.requiresDeposit,
         cancellationPolicy: procedure.cancellationPolicy,
-        originWaitlistEntryId: entry.id.value,
+        originWaitlistEntryId: entryRow.id.value,
         now,
       });
 
-      entry.claimOffer(createdBooking.id.value, now);
+      entryRow.claimOffer(createdBooking.id.value, now);
       await this.d.bookings.save(createdBooking);
-      await this.d.waitlist.save(entry);
+      await this.d.waitlist.save(entryRow);
       return {
+        entry: entryRow,
         booking: createdBooking,
-        events: [...createdBooking.pullDomainEvents(), ...entry.pullDomainEvents()],
+        events: [...createdBooking.pullDomainEvents(), ...entryRow.pullDomainEvents()],
       };
     });
 

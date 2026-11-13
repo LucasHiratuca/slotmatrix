@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
+import { Request, Response } from 'express';
 import { z } from 'zod';
 import { Container } from '../../composition-root';
-import { RouterKit } from './router-kit';
+import { extractAuthToken, RouterKit, SESSION_COOKIE_NAME } from './router-kit';
 import { bookingDto, procedureDto, resourceDto, waitlistDto } from '../../scheduling/application/queries';
 import { BILLING_SIGNATURE_HEADER, signBillingPayload } from '../../billing/infrastructure/BillingWebhookAcl';
 import { PLAN_CODES, PlanQuota } from '../../billing/domain/value-objects/PlanQuota';
 import { RESOURCE_CATEGORIES } from '../../catalog/domain/aggregates/BookableResource';
 import { ROLES } from '../../tenancy/domain/aggregates/Workspace';
-import { NotFoundError, QuotaExceededError, UnauthorizedError } from '../../shared/domain/errors';
+import { ForbiddenError, NotFoundError, QuotaExceededError, UnauthorizedError } from '../../shared/domain/errors';
 
 const registerBody = z.object({
   email: z.string().email(),
@@ -70,6 +71,20 @@ export async function handleBillingWebhook(c: Container, rawBody: string | undef
   return c.billing.processWebhook.execute({ command, rawPayload: payload });
 }
 
+function setSessionCookie(req: Request, res: Response, token: string, appPublicUrl?: string) {
+  const isHttps =
+    req.secure ||
+    req.headers['x-forwarded-proto'] === 'https' ||
+    Boolean(appPublicUrl?.startsWith('https://'));
+  res.cookie(SESSION_COOKIE_NAME, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: isHttps,
+    path: '/api',
+    maxAge: 8 * 60 * 60 * 1000,
+  });
+}
+
 export function registerRoutes(kit: RouterKit, c: Container) {
   const { tenancy, catalog, scheduling, queries: q } = c;
 
@@ -82,7 +97,11 @@ export function registerRoutes(kit: RouterKit, c: Container) {
     access: 'public',
     body: registerBody,
     successStatus: 201,
-    handler: ({ body }) => tenancy.register.execute(body),
+    handler: async ({ req, res, body }) => {
+      const r = await tenancy.register.execute(body);
+      setSessionCookie(req, res, r.token, c.config.appPublicUrl);
+      return r;
+    },
   });
 
   kit.add({
@@ -92,9 +111,52 @@ export function registerRoutes(kit: RouterKit, c: Container) {
     summary: 'Login',
     access: 'public',
     body: loginBody,
-    handler: async ({ body }) => {
+    handler: async ({ req, res, body }) => {
       const r = await tenancy.login.execute(body);
+      setSessionCookie(req, res, r.token, c.config.appPublicUrl);
       return { ...r, workspaces: await q.workspace.listForUser(r.userId) };
+    },
+  });
+
+  kit.add({
+    method: 'post',
+    path: '/auth/logout',
+    tag: 'Auth',
+    summary: 'Logout and revoke current session JWT',
+    access: 'public',
+    handler: async ({ req, res }) => {
+      const token = extractAuthToken(req);
+      if (token) {
+        await c.infra.tokens.revoke?.(token);
+      }
+      res.clearCookie(SESSION_COOKIE_NAME, { path: '/api' });
+      return { ok: true };
+    },
+  });
+
+  kit.add({
+    method: 'get',
+    path: '/auth/session',
+    tag: 'Auth',
+    summary: 'Inspect current authenticated session from HttpOnly cookie or Bearer token',
+    access: 'public',
+    handler: async ({ req }) => {
+      const token = extractAuthToken(req);
+      if (!token) return { authenticated: false };
+      const payload = c.infra.tokens.verify(token);
+      if (!payload) return { authenticated: false };
+      if (payload.jti && (await c.infra.tokens.isRevoked?.(payload.jti))) {
+        return { authenticated: false };
+      }
+      const user = await c.infra.users.findById(payload.userId);
+      if (!user) return { authenticated: false };
+      return {
+        authenticated: true,
+        userId: user.id.value,
+        email: user.email,
+        name: user.name,
+        workspaces: await q.workspace.listForUser(user.id.value),
+      };
     },
   });
 
@@ -105,6 +167,30 @@ export function registerRoutes(kit: RouterKit, c: Container) {
     summary: 'List workspaces for current user (Workspace Switcher)',
     access: 'user',
     handler: ({ userId }) => q.workspace.listForUser(userId),
+  });
+
+  
+  kit.add({
+    method: 'post',
+    path: '/auth/forgot-password',
+    tag: 'Auth',
+    summary: 'Request password reset email (Anti-enumeration timing safe)',
+    access: 'public',
+    body: z.object({ email: z.string().email() }),
+    handler: ({ body }) => tenancy.forgotPassword.execute(body),
+  });
+
+  kit.add({
+    method: 'post',
+    path: '/auth/reset-password',
+    tag: 'Auth',
+    summary: 'Reset password using token received via email',
+    access: 'public',
+    body: z.object({
+      token: z.string().min(1),
+      password: z.string().min(8),
+    }),
+    handler: ({ body }) => tenancy.resetPassword.execute(body),
   });
 
   // ---------- Tenancy
@@ -123,6 +209,7 @@ export function registerRoutes(kit: RouterKit, c: Container) {
     tag: 'Tenancy',
     summary: 'List workspace members',
     access: 'tenant',
+    minRole: 'ADMIN',
     handler: ({ tenant }) => q.workspace.members(tenant.tenantId),
   });
 
@@ -534,6 +621,7 @@ export function registerRoutes(kit: RouterKit, c: Container) {
     tag: 'Scheduling',
     summary: 'List signed webhook notification channels (secrets hidden)',
     access: 'tenant',
+    minRole: 'ADMIN',
     handler: async ({ tenant }) =>
       (await c.infra.webhookChannels.listByTenant(tenant.tenantId)).map((ch) => ({
         id: ch.id.value,
@@ -595,7 +683,7 @@ export function registerRoutes(kit: RouterKit, c: Container) {
     method: 'post',
     path: '/billing/simulate',
     tag: 'Billing',
-    summary: 'Plan simulator: fires a real signed webhook at the idempotent endpoint',
+    summary: 'Plan simulator: fires a real signed webhook at the idempotent endpoint (dev/demo only)',
     access: 'tenant',
     minRole: 'OWNER',
     body: z.object({
@@ -604,6 +692,9 @@ export function registerRoutes(kit: RouterKit, c: Container) {
       eventId: z.string().min(3).max(100).optional(),
     }),
     handler: async ({ tenant, body }) => {
+      if (c.config.isProduction || !c.config.enableBillingSimulator) {
+        throw new ForbiddenError('Simulador de assinatura desabilitado neste ambiente.');
+      }
       const type =
         body.event === 'upgrade'
           ? 'checkout.session.completed'
@@ -688,21 +779,22 @@ export function registerRoutes(kit: RouterKit, c: Container) {
     method: 'post',
     path: '/webhooks/stripe',
     tag: 'Billing',
-    summary: 'Official Stripe Webhook with cryptographic signature and idempotency (4 key events)',
+    summary: 'Official Stripe Webhook with mandatory cryptographic signature and idempotency (4 key events)',
     access: 'public',
     handler: async ({ req, rawBody }) => {
-      let eventPayload: any;
       const stripeSig = req.header('stripe-signature');
+      if (!rawBody) {
+        throw new UnauthorizedError('Payload vazio');
+      }
+      if (!stripeSig) {
+        throw new UnauthorizedError('Cabeçalho stripe-signature ausente');
+      }
 
-      if (c.stripeGateway.isConfigured() && stripeSig) {
-        try {
-          eventPayload = c.stripeGateway.verifyWebhookSignature(rawBody || '', stripeSig);
-        } catch (err: any) {
-          throw new UnauthorizedError(`Assinatura de Webhook do Stripe inválida: ${err.message}`);
-        }
-      } else {
-        if (!rawBody) throw new UnauthorizedError('Payload vazio');
-        eventPayload = JSON.parse(rawBody);
+      let eventPayload: any;
+      try {
+        eventPayload = c.stripeGateway.verifyWebhookSignature(rawBody, stripeSig);
+      } catch (err: any) {
+        throw new UnauthorizedError(`Assinatura de Webhook do Stripe inválida: ${err.message}`);
       }
 
       const command = c.acl.translate(eventPayload);
@@ -716,11 +808,11 @@ export function registerRoutes(kit: RouterKit, c: Container) {
     method: 'get',
     path: '/admin/metrics',
     tag: 'Admin',
-    summary: 'Admin SaaS Dashboard: MRR, active subscriptions, plan distribution & audit trail',
+    summary: 'Tenant Billing & Audit Summary (strictly scoped to active workspace)',
     access: 'tenant',
     minRole: 'ADMIN',
     handler: async ({ tenant }) => {
-      const counts = await c.infra.subscriptions.countByPlanAndStatus();
+      const sub = await c.infra.subscriptions.findByTenant(tenant.tenantId);
 
       let mrrCents = 0;
       let activeCount = 0;
@@ -730,15 +822,15 @@ export function registerRoutes(kit: RouterKit, c: Container) {
         ENTERPRISE: { total: 0, active: 0 },
       };
 
-      for (const item of counts) {
-        if (!byPlan[item.plan]) byPlan[item.plan] = { total: 0, active: 0 };
-        byPlan[item.plan].total += item.count;
-        if (item.status === 'ACTIVE' || item.status === 'TRIALING') {
-          byPlan[item.plan].active += item.count;
-          activeCount += item.count;
-          if (item.status === 'ACTIVE') {
-            if (item.plan === 'PRO') mrrCents += item.count * 34900;
-            if (item.plan === 'ENTERPRISE') mrrCents += item.count * 89000;
+      if (sub) {
+        if (!byPlan[sub.plan]) byPlan[sub.plan] = { total: 0, active: 0 };
+        byPlan[sub.plan].total = 1;
+        if (sub.status === 'ACTIVE' || sub.status === 'TRIALING') {
+          byPlan[sub.plan].active = 1;
+          activeCount = 1;
+          if (sub.status === 'ACTIVE') {
+            if (sub.plan === 'PRO') mrrCents = 34900;
+            if (sub.plan === 'ENTERPRISE') mrrCents = 89000;
           }
         }
       }
