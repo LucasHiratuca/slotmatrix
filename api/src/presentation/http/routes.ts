@@ -150,11 +150,14 @@ export function registerRoutes(kit: RouterKit, c: Container) {
       }
       const user = await c.infra.users.findById(payload.userId);
       if (!user) return { authenticated: false };
+      const perfil = await c.infra.perfis.findByUsuarioId(user.id.value);
       return {
         authenticated: true,
         userId: user.id.value,
         email: user.email,
         name: user.name,
+        bio: perfil?.bio || '',
+        photoUrl: perfil?.fotoKey ? `/api/perfil/${user.id.value}/foto` : null,
         workspaces: await q.workspace.listForUser(user.id.value),
       };
     },
@@ -167,6 +170,29 @@ export function registerRoutes(kit: RouterKit, c: Container) {
     summary: 'List workspaces for current user (Workspace Switcher)',
     access: 'user',
     handler: ({ userId }) => q.workspace.listForUser(userId),
+  });
+
+  kit.add({
+    method: 'get',
+    path: '/perfil/:userId',
+    tag: 'Perfil',
+    summary: 'Visualizar perfil de usuário (bio, foto)',
+    access: 'user',
+    handler: ({ req, userId }) => {
+      const targetUserId = req.params.userId;
+      return tenancy.getPerfil.execute({ userId: targetUserId, actorId: userId });
+    },
+  });
+
+  kit.add({
+    method: 'get',
+    path: '/me/profile',
+    tag: 'Perfil',
+    summary: 'Visualizar o próprio perfil do usuário autenticado',
+    access: 'user',
+    handler: ({ userId }) => {
+      return tenancy.getPerfil.execute({ userId, actorId: userId });
+    },
   });
 
   

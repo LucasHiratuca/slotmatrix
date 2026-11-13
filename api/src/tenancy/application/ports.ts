@@ -34,3 +34,15 @@ export interface IAuditLogRepository {
   append(entry: AuditLogEntry): Promise<void>;
   listByTenant(tenantId: string, limit: number): Promise<AuditLogEntry[]>;
 }
+
+export interface PerfilData {
+  usuarioId: string;
+  bio: string;
+  fotoKey: string | null;
+  atualizadoEm?: Date;
+}
+
+export interface IPerfilRepository {
+  findByUsuarioId(usuarioId: string): Promise<PerfilData | null>;
+  save(data: { usuarioId: string; bio: string; fotoKey?: string | null }): Promise<void>;
+}

@@ -1,7 +1,7 @@
 import { AuthTokenService, Clock, PasswordHasher, UnitOfWork } from './shared/application/ports';
 import { InProcessEventDispatcher } from './shared/application/InProcessEventDispatcher';
 import { WorkspaceReadService } from './shared/application/WorkspaceReadService';
-import { IAuditLogRepository, IEmailGateway, IUserRepository } from './tenancy/application/ports';
+import { IAuditLogRepository, IEmailGateway, IPerfilRepository, IUserRepository } from './tenancy/application/ports';
 import { IWorkspaceRepository } from './tenancy/domain/repositories/IWorkspaceRepository';
 import { ISubscriptionRepository } from './billing/domain/repositories/ISubscriptionRepository';
 import { IBookableResourceRepository } from './catalog/domain/repositories/IBookableResourceRepository';
@@ -14,14 +14,17 @@ import { SubscriptionEntitlementPolicy } from './billing/application/Subscriptio
 import { ProcessBillingWebhookUseCase } from './billing/application/ProcessBillingWebhookUseCase';
 import { BillingWebhookAcl } from './billing/infrastructure/BillingWebhookAcl';
 import { StripeBillingGateway } from './billing/infrastructure/stripe-client';
+import { uploadDocument } from './shared/infrastructure/s3-storage';
 import {
   BootstrapWorkspaceOnSignupUseCase,
   ChangeMemberRoleUseCase,
+  GetPerfilUseCase,
   InviteWorkspaceMemberUseCase,
   LoginUseCase,
   RemoveWorkspaceMemberUseCase,
   RequestPasswordResetUseCase,
   ResetPasswordUseCase,
+  UpdatePerfilUseCase,
 } from './tenancy/application/use-cases';
 import { AUDITED_EVENTS, OnDomainEventAuditHandler } from './tenancy/application/audit-handler';
 import {
@@ -58,6 +61,7 @@ export interface Infrastructure {
   uow: UnitOfWork;
   clock: Clock;
   users: IUserRepository;
+  perfis: IPerfilRepository;
   workspaces: IWorkspaceRepository;
   subscriptions: ISubscriptionRepository;
   resources: IBookableResourceRepository;
@@ -114,6 +118,12 @@ export function buildContainer(infra: Infrastructure, config: AppConfig) {
     invite: new InviteWorkspaceMemberUseCase({ ...base, users: infra.users, workspaces: infra.workspaces }),
     changeRole: new ChangeMemberRoleUseCase({ ...base, workspaces: infra.workspaces }),
     removeMember: new RemoveWorkspaceMemberUseCase({ ...base, workspaces: infra.workspaces }),
+    getPerfil: new GetPerfilUseCase({ users: infra.users, perfis: infra.perfis }),
+    updatePerfil: new UpdatePerfilUseCase({
+      users: infra.users,
+      perfis: infra.perfis,
+      uploadDocument,
+    }),
   };
 
   const catalogDeps = { ...base, resources: infra.resources, procedures: infra.procedures, entitlements };

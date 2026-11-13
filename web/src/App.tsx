@@ -27,6 +27,7 @@ import { ProceduresView } from './ProceduresView';
 import { AuditView, AuditEntryItem } from './AuditView';
 import { LoginView } from './LoginView';
 import { ErrorBoundary } from './ErrorBoundary';
+import { ProfileModal } from './ProfileModal';
 import { Avatar } from './ui/Primitives';
 import {
   formatApiError,
@@ -59,6 +60,7 @@ import {
   Search,
   ShieldCheck,
   Sun,
+  User,
   X,
 } from 'lucide-react';
 
@@ -116,6 +118,16 @@ export const App: React.FC = () => {
   const [currentUserName, setCurrentUserName] = useState<string | null>(() =>
     localStorage.getItem('slotmatrix_user_name'),
   );
+  const [currentUserId, setCurrentUserId] = useState<string | null>(() =>
+    localStorage.getItem('slotmatrix_user_id'),
+  );
+  const [currentUserBio, setCurrentUserBio] = useState<string>(() =>
+    localStorage.getItem('slotmatrix_user_bio') || '',
+  );
+  const [currentUserPhotoUrl, setCurrentUserPhotoUrl] = useState<string | null>(() =>
+    localStorage.getItem('slotmatrix_user_photo_url'),
+  );
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(() =>
     localStorage.getItem('slotmatrix_workspace_id'),
@@ -197,10 +209,16 @@ export const App: React.FC = () => {
     localStorage.removeItem('slotmatrix_workspace_id');
     localStorage.removeItem('slotmatrix_user_email');
     localStorage.removeItem('slotmatrix_user_name');
+    localStorage.removeItem('slotmatrix_user_id');
+    localStorage.removeItem('slotmatrix_user_bio');
+    localStorage.removeItem('slotmatrix_user_photo_url');
     void apiRequest('/auth/logout', { method: 'POST' }).catch(() => undefined);
     setAuthenticated(false);
     setCurrentUserEmail(null);
     setCurrentUserName(null);
+    setCurrentUserId(null);
+    setCurrentUserBio('');
+    setCurrentUserPhotoUrl(null);
     setWorkspaces([]);
     setActiveWorkspaceId(null);
     setOverview(null);
@@ -243,6 +261,10 @@ export const App: React.FC = () => {
       localStorage.setItem('slotmatrix_user_email', res.email ?? loginEmail);
       if (res.name) {
         localStorage.setItem('slotmatrix_user_name', res.name);
+      }
+      if ((res as any).userId) {
+        setCurrentUserId((res as any).userId);
+        localStorage.setItem('slotmatrix_user_id', (res as any).userId);
       }
       setOverview(null);
       setIsLoadingWorkspace(true);
@@ -371,12 +393,18 @@ export const App: React.FC = () => {
           userId?: string;
           email?: string;
           name?: string;
+          bio?: string;
+          photoUrl?: string | null;
           workspaces?: WorkspaceSummary[];
         }>('/auth/session');
         if (cancelled) return;
         if (session?.authenticated) {
           const wsList = Array.isArray(session.workspaces) ? session.workspaces : [];
           setAuthenticated(true);
+          if (session.userId) {
+            setCurrentUserId(session.userId);
+            localStorage.setItem('slotmatrix_user_id', session.userId);
+          }
           if (session.email) {
             setCurrentUserEmail(session.email);
             localStorage.setItem('slotmatrix_user_email', session.email);
@@ -384,6 +412,18 @@ export const App: React.FC = () => {
           if (session.name) {
             setCurrentUserName(session.name);
             localStorage.setItem('slotmatrix_user_name', session.name);
+          }
+          if (session.bio !== undefined) {
+            setCurrentUserBio(session.bio || '');
+            localStorage.setItem('slotmatrix_user_bio', session.bio || '');
+          }
+          if (session.photoUrl !== undefined) {
+            setCurrentUserPhotoUrl(session.photoUrl);
+            if (session.photoUrl) {
+              localStorage.setItem('slotmatrix_user_photo_url', session.photoUrl);
+            } else {
+              localStorage.removeItem('slotmatrix_user_photo_url');
+            }
           }
           setWorkspaces(wsList);
           const storedWs = localStorage.getItem('slotmatrix_workspace_id');
@@ -873,7 +913,7 @@ export const App: React.FC = () => {
                 }}
                 className="inline-flex items-center gap-2.5 px-2.5 py-1 rounded-lg bg-canvas hover:bg-sunken border border-border-subtle transition"
               >
-                <Avatar name={userProfile.fullName} size="xs" />
+                <Avatar name={userProfile.fullName} size="xs" src={currentUserPhotoUrl} />
                 <div className="text-left hidden md:block">
                   <div className="text-[13px] font-semibold text-ink-primary leading-tight">
                     {userProfile.fullName}
@@ -895,9 +935,9 @@ export const App: React.FC = () => {
               </button>
 
               {userMenuOpen && (
-                <div className="absolute right-0 top-11 w-64 bg-elevated border border-border-subtle rounded-xl shadow-xl p-3 space-y-2 z-50">
+                <div className="absolute right-0 top-11 w-64 bg-elevated border border-border-subtle rounded-xl shadow-xl p-3 space-y-2 z-50 animate-fade-in">
                   <div className="flex items-center gap-2.5 px-2 py-1.5 border-b border-border-subtle">
-                    <Avatar name={userProfile.fullName} size="sm" />
+                    <Avatar name={userProfile.fullName} size="sm" src={currentUserPhotoUrl} />
                     <div className="min-w-0">
                       <div className="text-[13px] font-semibold text-ink-primary truncate">
                         {userProfile.fullName}
@@ -916,9 +956,21 @@ export const App: React.FC = () => {
                     type="button"
                     onClick={() => {
                       setUserMenuOpen(false);
+                      setIsProfileModalOpen(true);
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-sunken text-[13px] text-ink-primary flex items-center gap-2 font-medium transition"
+                  >
+                    <User className="w-3.5 h-3.5 text-ink-secondary" />
+                    <span>Meu Perfil</span>
+                  </button>
+                  <div className="my-1 border-t border-border-subtle" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserMenuOpen(false);
                       handleLogout();
                     }}
-                    className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-sunken text-[13px] text-[var(--status-error-text)] flex items-center gap-2 font-medium"
+                    className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-sunken text-[13px] text-[var(--status-error-text)] flex items-center gap-2 font-medium transition"
                   >
                     <LogOut className="w-3.5 h-3.5" />
                     <span>Sair da conta</span>
@@ -1387,6 +1439,27 @@ export const App: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+      {isProfileModalOpen && (
+        <ProfileModal
+          isOpen={isProfileModalOpen}
+          onClose={() => setIsProfileModalOpen(false)}
+          userId={currentUserId || ''}
+          userName={userProfile.fullName}
+          userEmail={currentUserEmail || ''}
+          userRole={userProfile.roleLabel}
+          workspaceName={overview?.name}
+          initialBio={currentUserBio}
+          initialPhotoUrl={currentUserPhotoUrl}
+          onProfileUpdated={(newBio, newPhotoUrl) => {
+            setCurrentUserBio(newBio);
+            localStorage.setItem('slotmatrix_user_bio', newBio);
+            if (newPhotoUrl) {
+              setCurrentUserPhotoUrl(newPhotoUrl);
+              localStorage.setItem('slotmatrix_user_photo_url', newPhotoUrl);
+            }
+          }}
+        />
       )}
     </div>
   );

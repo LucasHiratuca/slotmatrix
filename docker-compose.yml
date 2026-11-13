@@ -72,11 +72,11 @@ services:
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:18174}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:18174}
-      S3_ENDPOINT: ${S3_ENDPOINT:-http://garage_s3:3900}
+      S3_ENDPOINT: ${S3_ENDPOINT:-garage_s3:3900}
       S3_REGION: ${S3_REGION:-garage}
-      S3_BUCKET: ${S3_BUCKET:-clinic-docs}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
-      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      S3_BUCKET: ${S3_BUCKET:-perfis}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-GK9ae6ab4a2d12a3227b1a0d9a}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-f46bb999a2d2615ad200369932ccff5454f113c74c4614e6027dc2380dcc5632}
       S3_USE_SSL: ${S3_USE_SSL:-false}
       ALLOW_LOCAL_WEBHOOKS: ${ALLOW_LOCAL_WEBHOOKS:-false}
       AUTO_SEED: ${AUTO_SEED:-false}

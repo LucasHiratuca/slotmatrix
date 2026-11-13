@@ -44,7 +44,9 @@ export const Avatar: React.FC<{
   name: string;
   size?: 'xs' | 'sm' | 'md' | 'lg';
   className?: string;
-}> = ({ name, size = 'sm', className = '' }) => {
+  src?: string | null;
+}> = ({ name, size = 'sm', className = '', src }) => {
+  const [imageError, setImageError] = useState(false);
   const initials = getInitials(name);
   const palette = AVATAR_MINERAL_PALETTES[hashName(name || 'User') % AVATAR_MINERAL_PALETTES.length];
   const sizeClass =
@@ -55,6 +57,17 @@ export const Avatar: React.FC<{
       : size === 'md'
       ? 'w-9 h-9 text-[13px]'
       : 'w-11 h-11 text-[14px]';
+
+  if (src && !imageError) {
+    return (
+      <img
+        src={src}
+        alt={name}
+        onError={() => setImageError(true)}
+        className={`inline-flex items-center justify-center rounded-full border border-border-subtle object-cover select-none shrink-0 ${sizeClass} ${className}`}
+      />
+    );
+  }
 
   return (
     <span

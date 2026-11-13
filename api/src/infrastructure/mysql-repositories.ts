@@ -18,7 +18,7 @@ import {
   WebhookChannelRow,
 } from '../scheduling/infrastructure/mappers';
 import { IWorkspaceRepository } from '../tenancy/domain/repositories/IWorkspaceRepository';
-import { AuditLogEntry, IAuditLogRepository, IUserRepository } from '../tenancy/application/ports';
+import { AuditLogEntry, IAuditLogRepository, IPerfilRepository, IUserRepository, PerfilData } from '../tenancy/application/ports';
 import { ISubscriptionRepository } from '../billing/domain/repositories/ISubscriptionRepository';
 import { IProcessedWebhookStore } from '../billing/application/ports';
 import { IBookableResourceRepository } from '../catalog/domain/repositories/IBookableResourceRepository';
@@ -80,6 +80,42 @@ export class MySqlUserRepository implements IUserRepository {
       .conn()
       .query<(UserRow & RowDataPacket)[]>('SELECT * FROM users WHERE reset_token_hash = ? LIMIT 1', [tokenHash]);
     return rows[0] ? UserMapper.toDomain(rows[0]) : null;
+  }
+}
+
+export class MySqlPerfilRepository implements IPerfilRepository {
+  constructor(private readonly db: Database) {}
+
+  async findByUsuarioId(usuarioId: string): Promise<PerfilData | null> {
+    const [rows] = await this.db.conn().query<(RowDataPacket & { bio: string | null; foto_key: string | null; atualizado_em?: Date })[]>(
+      'SELECT bio, foto_key, atualizado_em FROM perfis WHERE usuario_id = ? LIMIT 1',
+      [usuarioId],
+    );
+    if (!rows[0]) return null;
+    return {
+      usuarioId,
+      bio: rows[0].bio || '',
+      fotoKey: rows[0].foto_key || null,
+      atualizadoEm: rows[0].atualizado_em,
+    };
+  }
+
+  async save(data: { usuarioId: string; bio: string; fotoKey?: string | null }): Promise<void> {
+    if (data.fotoKey !== undefined) {
+      await this.db.conn().execute(
+        `INSERT INTO perfis (usuario_id, bio, foto_key)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE bio = VALUES(bio), foto_key = VALUES(foto_key)`,
+        [data.usuarioId, data.bio, data.fotoKey],
+      );
+    } else {
+      await this.db.conn().execute(
+        `INSERT INTO perfis (usuario_id, bio, foto_key)
+         VALUES (?, ?, NULL)
+         ON DUPLICATE KEY UPDATE bio = VALUES(bio)`,
+        [data.usuarioId, data.bio],
+      );
+    }
   }
 }
 

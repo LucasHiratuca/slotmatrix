@@ -140,6 +140,86 @@ export function createApp(c: Container) {
     }
   });
 
+  // ---------- Perfil: Recupera foto armazenada no Garage S3 e serve via streaming
+  const handleFotoStream = async (userId: string, res: express.Response) => {
+    try {
+      const perfil = await c.infra.perfis.findByUsuarioId(userId);
+      if (!perfil || !perfil.fotoKey) {
+        return res.status(404).send('Foto não encontrada');
+      }
+      const ext = perfil.fotoKey.split('.').pop()?.toLowerCase() || 'jpg';
+      const mimeTypes: Record<string, string> = {
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        png: 'image/png',
+        gif: 'image/gif',
+        webp: 'image/webp',
+      };
+      if (mimeTypes[ext]) {
+        res.setHeader('Content-Type', mimeTypes[ext]);
+      } else {
+        res.setHeader('Content-Type', 'image/jpeg');
+      }
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      const stream = await getDocumentStream(perfil.fotoKey);
+      (stream as any).on('error', () => {
+        if (!res.headersSent) {
+          res.status(404).send('Foto não encontrada');
+        }
+      });
+      (stream as any).pipe(res);
+    } catch (err: any) {
+      if (!res.headersSent) {
+        res.status(404).send('Foto não encontrada');
+      }
+    }
+  };
+
+  app.get('/api/perfil/:userId/foto', async (req, res) => {
+    await handleFotoStream(req.params.userId, res);
+  });
+  app.get('/perfil/:userId/foto', async (req, res) => {
+    await handleFotoStream(req.params.userId, res);
+  });
+
+  // ---------- Perfil: Atualização de bio e upload de foto para o Garage S3
+  const handlePerfilEditar = async (req: express.Request, res: express.Response, next: express.NextFunction, explicitUserId?: string) => {
+    try {
+      const actorId = await kit.authenticate(req);
+      const userId = explicitUserId || req.params.userId || actorId;
+      const bio = req.body?.bio;
+      const file = req.file ? {
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        buffer: req.file.buffer,
+        size: req.file.size,
+      } : undefined;
+
+      const result = await c.tenancy.updatePerfil.execute({
+        userId,
+        actorId,
+        bio,
+        file,
+      });
+      return res.status(200).json(result);
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  app.post('/api/perfil/:userId/editar', uploadRateLimiter, upload.single('foto'), async (req, res, next) => {
+    await handlePerfilEditar(req, res, next);
+  });
+  app.post('/perfil/:userId/editar', uploadRateLimiter, upload.single('foto'), async (req, res, next) => {
+    await handlePerfilEditar(req, res, next);
+  });
+  app.post('/api/me/profile', uploadRateLimiter, upload.single('foto'), async (req, res, next) => {
+    await handlePerfilEditar(req, res, next);
+  });
+  app.put('/api/me/profile', uploadRateLimiter, upload.single('foto'), async (req, res, next) => {
+    await handlePerfilEditar(req, res, next);
+  });
+
   const enableDocs = c.config.enableApiDocs ?? process.env.NODE_ENV !== 'production';
   if (enableDocs) {
     const spec = {

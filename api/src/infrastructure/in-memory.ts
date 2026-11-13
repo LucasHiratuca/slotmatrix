@@ -15,7 +15,7 @@ import {
   WebhookChannelRow,
 } from '../scheduling/infrastructure/mappers';
 import { IWorkspaceRepository } from '../tenancy/domain/repositories/IWorkspaceRepository';
-import { AuditLogEntry, IAuditLogRepository, IEmailGateway, IUserRepository, PasswordResetEmailPayload } from '../tenancy/application/ports';
+import { AuditLogEntry, IAuditLogRepository, IEmailGateway, IPerfilRepository, IUserRepository, PasswordResetEmailPayload, PerfilData } from '../tenancy/application/ports';
 import { ISubscriptionRepository } from '../billing/domain/repositories/ISubscriptionRepository';
 import { IProcessedWebhookStore } from '../billing/application/ports';
 import { IBookableResourceRepository } from '../catalog/domain/repositories/IBookableResourceRepository';
@@ -76,6 +76,22 @@ export class InMemoryUserRepository implements IUserRepository {
   async findByResetTokenHash(tokenHash: string) {
     const r = [...this.rows.values()].find((x) => x.reset_token_hash === tokenHash);
     return r ? UserMapper.toDomain(r) : null;
+  }
+}
+
+export class InMemoryPerfilRepository implements IPerfilRepository {
+  rows = new Map<string, PerfilData>();
+  async findByUsuarioId(usuarioId: string): Promise<PerfilData | null> {
+    return this.rows.get(usuarioId) ?? null;
+  }
+  async save(data: { usuarioId: string; bio: string; fotoKey?: string | null }): Promise<void> {
+    const existing = this.rows.get(data.usuarioId);
+    this.rows.set(data.usuarioId, {
+      usuarioId: data.usuarioId,
+      bio: data.bio,
+      fotoKey: data.fotoKey !== undefined ? data.fotoKey : (existing?.fotoKey ?? null),
+      atualizadoEm: new Date(),
+    });
   }
 }
 
@@ -290,6 +306,7 @@ export function buildInMemoryInfrastructure(opts: { clock?: Clock; jwtSecret?: s
     uow: new InMemoryUnitOfWork(),
     clock: opts.clock ?? new MutableClock(),
     users: new InMemoryUserRepository(),
+    perfis: new InMemoryPerfilRepository(),
     workspaces: new InMemoryWorkspaceRepository(),
     subscriptions: new InMemorySubscriptionRepository(),
     resources: new InMemoryBookableResourceRepository(),

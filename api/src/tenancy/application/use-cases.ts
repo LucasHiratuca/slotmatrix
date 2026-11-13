@@ -194,3 +194,81 @@ export class RemoveWorkspaceMemberUseCase {
     await this.d.dispatcher.dispatch(events);
   }
 }
+
+const TIPOS_PERMITIDOS_FOTO = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+export class GetPerfilUseCase {
+  constructor(
+    private readonly d: {
+      users: IUserRepository;
+      perfis: import('./ports').IPerfilRepository;
+    },
+  ) {}
+
+  async execute(input: { userId: string; actorId?: string }) {
+    const user = await this.d.users.findById(input.userId);
+    if (!user) throw new NotFoundError('Usuário não encontrado');
+    const perfil = await this.d.perfis.findByUsuarioId(input.userId);
+    const ehDono = input.actorId ? input.actorId === input.userId : true;
+    return {
+      userId: user.id.value,
+      nome: user.name,
+      email: user.email,
+      bio: perfil?.bio || '',
+      fotoKey: perfil?.fotoKey || null,
+      fotoUrl: perfil?.fotoKey ? `/api/perfil/${user.id.value}/foto` : null,
+      ehDono,
+    };
+  }
+}
+
+export class UpdatePerfilUseCase {
+  constructor(
+    private readonly d: {
+      users: IUserRepository;
+      perfis: import('./ports').IPerfilRepository;
+      uploadDocument: (key: string, buffer: Buffer, mimetype: string) => Promise<{ key: string; size: number }>;
+    },
+  ) {}
+
+  async execute(input: {
+    userId: string;
+    actorId: string;
+    bio?: string;
+    file?: { originalname: string; mimetype: string; buffer: Buffer; size: number };
+  }) {
+    if (input.actorId !== input.userId) {
+      throw new ForbiddenError('Você não tem permissão para editar o perfil de outro usuário.');
+    }
+    const user = await this.d.users.findById(input.userId);
+    if (!user) throw new NotFoundError('Usuário não encontrado');
+
+    const bio = (input.bio ?? '').trim().slice(0, 500);
+    let fotoKeyNova: string | undefined = undefined;
+
+    if (input.file) {
+      if (!TIPOS_PERMITIDOS_FOTO.includes(input.file.mimetype)) {
+        throw new ValidationError('Tipo de arquivo inválido. Envie JPEG, PNG, GIF ou WebP.');
+      }
+      if (input.file.size > 5 * 1024 * 1024) {
+        throw new ValidationError('Tamanho do arquivo excede o limite máximo de 5 MB.');
+      }
+      const ext = input.file.originalname.split('.').pop()?.toLowerCase() || 'jpg';
+      fotoKeyNova = `usuario-${input.userId}/${randomBytes(16).toString('hex')}.${ext}`;
+      await this.d.uploadDocument(fotoKeyNova, input.file.buffer, input.file.mimetype);
+    }
+
+    await this.d.perfis.save({
+      usuarioId: input.userId,
+      bio,
+      ...(fotoKeyNova !== undefined ? { fotoKey: fotoKeyNova } : {}),
+    });
+
+    return {
+      ok: true,
+      message: 'Perfil atualizado com sucesso!',
+      bio,
+      fotoUrl: fotoKeyNova ? `/api/perfil/${input.userId}/foto` : undefined,
+    };
+  }
+}
