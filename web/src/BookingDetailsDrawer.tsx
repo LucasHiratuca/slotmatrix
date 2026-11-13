@@ -704,7 +704,7 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
           }
           touchStartYRef.current = null;
         }}
-        className="w-full md:w-[440px] max-h-[85vh] md:max-h-none md:h-full bg-surface border-t md:border-t-0 md:border-l border-border-subtle rounded-t-2xl md:rounded-none shadow-2xl flex flex-col justify-between overflow-hidden transition-transform"
+        className="relative w-full md:w-[440px] max-h-[85vh] md:max-h-none md:h-full bg-surface border-t md:border-t-0 md:border-l border-border-subtle rounded-t-2xl md:rounded-none shadow-2xl flex flex-col justify-between overflow-hidden transition-transform"
       >
         {/* Alça de arrasto do Bottom Sheet no mobile */}
         <div
@@ -1101,72 +1101,6 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
               </div>
             </section>
           )}
-
-          {/* 7. DIÁLOGO DE CONFIRMAÇÃO COM CONSEQUÊNCIA (só aparece quando acionado) */}
-          {confirmDialog && (
-            <section
-              role="alertdialog"
-              aria-label="Confirmação de ação na reserva"
-              data-testid="drawer-confirm-dialog"
-              className="rounded-xl bg-[var(--status-noshow-bg)] border border-[var(--status-noshow-border)] p-4 space-y-3 text-xs"
-            >
-              <div className="font-semibold text-[var(--status-noshow-text)] text-sm">
-                {confirmDialog.type === 'no-show'
-                  ? `Registrar falta de ${clientName}?`
-                  : `Cancelar a reserva de ${clientName}?`}
-              </div>
-              <p className="text-[var(--status-noshow-text)] leading-relaxed">
-                {confirmDialog.type === 'no-show' ? (
-                  <>
-                    O paciente será marcado como{' '}
-                    <strong>Não compareceu</strong> e{' '}
-                    <strong>
-                      100% do sinal ({formatCurrencyBRL(depositCents)})
-                    </strong>{' '}
-                    será retido conforme a política da clínica.
-                  </>
-                ) : (
-                  <>
-                    A vaga será oferecida ao próximo da lista e{' '}
-                    <strong>
-                      {partialRetentionPct}% do sinal (
-                      {formatCurrencyBRL(estimatedCancelRetainedCents)})
-                    </strong>{' '}
-                    será retido.
-                    {confirmDialog.type === 'cancel-recreate' &&
-                      ' Em seguida, abriremos o novo agendamento já preenchido com este paciente e procedimento.'}
-                  </>
-                )}
-              </p>
-              <div className="flex items-center justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setConfirmDialog(null)}
-                  className="min-h-[40px] px-3.5 py-1.5 rounded-lg bg-surface border border-border-subtle text-ink-primary font-medium"
-                >
-                  Voltar
-                </button>
-                <button
-                  type="button"
-                  disabled={actionLoading !== null}
-                  data-testid="drawer-confirm-destructive-btn"
-                  onClick={() =>
-                    void executeLifecycleAction(
-                      confirmDialog.type === 'no-show' ? 'no-show' : 'cancel',
-                      confirmDialog.type === 'cancel-recreate',
-                    )
-                  }
-                  className="min-h-[40px] px-3.5 py-1.5 rounded-lg bg-[var(--status-error-border)] hover:opacity-95 text-white font-semibold shadow-xs"
-                >
-                  {actionLoading
-                    ? 'Processando...'
-                    : confirmDialog.type === 'no-show'
-                    ? 'Registrar falta'
-                    : 'Cancelar reserva'}
-                </button>
-              </div>
-            </section>
-          )}
         </div>
 
         {/* 6. RODAPÉ FIXO DE AÇÕES (1 ação primária contextual + Reagendar explicado + menu "⋯"; oculto para Especialista) */}
@@ -1254,6 +1188,22 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
                       role="menu"
                       className="absolute right-0 bottom-full mb-2 w-64 bg-elevated border border-border-strong rounded-xl shadow-xl p-1.5 z-50 space-y-1 text-xs"
                     >
+                      {canReschedule && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          data-testid="drawer-menu-reschedule"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            setRescheduleModalOpen(true);
+                          }}
+                          className="w-full text-left px-3 py-2 rounded-lg hover:bg-sunken text-ink-primary font-medium flex items-center gap-2"
+                        >
+                          <Calendar className="w-3.5 h-3.5 text-brand shrink-0" />
+                          <span>Reagendar horário...</span>
+                        </button>
+                      )}
+
                       {onCancelAndRecreate && (
                         <button
                           type="button"
@@ -1278,9 +1228,10 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
                           setMenuOpen(false);
                           setConfirmDialog({ type: 'no-show' });
                         }}
-                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-sunken text-ink-primary font-medium"
+                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-sunken text-[var(--status-noshow-text)] font-semibold flex items-center gap-2"
                       >
-                        Registrar falta
+                        <AlertCircle className="w-3.5 h-3.5 text-[var(--status-noshow-text)] shrink-0" />
+                        <span>Registrar falta</span>
                       </button>
 
                       <button
@@ -1291,9 +1242,10 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
                           setMenuOpen(false);
                           setConfirmDialog({ type: 'cancel' });
                         }}
-                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-sunken text-ink-primary font-medium"
+                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-sunken text-ink-secondary hover:text-ink-primary font-medium flex items-center gap-2"
                       >
-                        Cancelar e oferecer vaga
+                        <X className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+                        <span>Cancelar e oferecer vaga</span>
                       </button>
                     </div>
                   )}
@@ -1302,6 +1254,100 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
             </div>
           )}
         </div>
+
+        {/* Modal de Confirmação Sobreposto com Foco e Visibilidade Imediata */}
+        {confirmDialog && (
+          <div
+            className="absolute inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+            onClick={() => setConfirmDialog(null)}
+          >
+            <div
+              role="alertdialog"
+              aria-modal="true"
+              aria-label="Confirmação de ação na reserva"
+              data-testid="drawer-confirm-dialog"
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm rounded-2xl bg-surface border border-border-strong shadow-2xl p-5 space-y-3.5 text-xs animate-in zoom-in-95 duration-150"
+            >
+              <div className="flex items-center gap-2.5 font-bold text-ink-primary text-sm">
+                <AlertCircle className="w-5 h-5 text-[var(--status-noshow-text)] shrink-0" />
+                <span>
+                  {confirmDialog.type === 'no-show'
+                    ? `Registrar falta de ${clientName}?`
+                    : confirmDialog.type === 'cancel-recreate'
+                    ? `Cancelar e criar nova reserva?`
+                    : `Cancelar a reserva de ${clientName}?`}
+                </span>
+              </div>
+
+              <p className="text-ink-secondary leading-relaxed">
+                {confirmDialog.type === 'no-show' ? (
+                  <>
+                    O paciente será marcado como{' '}
+                    <strong className="text-ink-primary">Não compareceu</strong> e{' '}
+                    <strong className="text-ink-primary">
+                      100% do sinal ({formatCurrencyBRL(depositCents)})
+                    </strong>{' '}
+                    será retido conforme a política da clínica.
+                  </>
+                ) : (
+                  <>
+                    A vaga será oferecida ao próximo da lista e{' '}
+                    <strong className="text-ink-primary">
+                      {partialRetentionPct}% do sinal (
+                      {formatCurrencyBRL(estimatedCancelRetainedCents)})
+                    </strong>{' '}
+                    será retido.
+                    {confirmDialog.type === 'cancel-recreate' &&
+                      ' Em seguida, abriremos o novo agendamento já preenchido com este paciente e procedimento.'}
+                  </>
+                )}
+              </p>
+
+              {actionError && (
+                <div className="p-2.5 rounded-lg bg-[var(--status-error-bg)] border border-[var(--status-error-border)] text-[var(--status-error-text)] text-xs flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{actionError}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-border-subtle">
+                <button
+                  type="button"
+                  onClick={() => setConfirmDialog(null)}
+                  className="min-h-[40px] px-4 py-2 rounded-lg bg-surface hover:bg-sunken border border-border-subtle text-ink-primary font-semibold transition"
+                >
+                  Voltar
+                </button>
+                <button
+                  type="button"
+                  disabled={actionLoading !== null}
+                  data-testid="drawer-confirm-destructive-btn"
+                  onClick={() =>
+                    void executeLifecycleAction(
+                      confirmDialog.type === 'no-show' ? 'no-show' : 'cancel',
+                      confirmDialog.type === 'cancel-recreate',
+                    )
+                  }
+                  className="min-h-[40px] px-4 py-2 rounded-lg bg-[var(--status-error-border)] hover:opacity-95 text-white font-semibold shadow-xs flex items-center gap-1.5 transition"
+                >
+                  {actionLoading ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Processando...</span>
+                    </>
+                  ) : confirmDialog.type === 'no-show' ? (
+                    'Registrar falta'
+                  ) : confirmDialog.type === 'cancel-recreate' ? (
+                    'Cancelar e criar nova'
+                  ) : (
+                    'Cancelar reserva'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </aside>
 
       {/* Modal interativo de Reagendamento com alocação simultânea de 3 recursos */}
