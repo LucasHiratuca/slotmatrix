@@ -266,6 +266,23 @@ export const App: React.FC = () => {
         setCurrentUserId((res as any).userId);
         localStorage.setItem('slotmatrix_user_id', (res as any).userId);
       }
+      void apiRequest<{ bio?: string; photoUrl?: string | null; userId?: string }>('/auth/session')
+        .then((s) => {
+          if (s?.bio) {
+            setCurrentUserBio(s.bio);
+            localStorage.setItem('slotmatrix_user_bio', s.bio);
+          }
+          if (s?.photoUrl) {
+            const p = `${s.photoUrl}?v=${Date.now()}`;
+            setCurrentUserPhotoUrl(p);
+            localStorage.setItem('slotmatrix_user_photo_url', p);
+          }
+          if (s?.userId) {
+            setCurrentUserId(s.userId);
+            localStorage.setItem('slotmatrix_user_id', s.userId);
+          }
+        })
+        .catch(() => undefined);
       setOverview(null);
       setIsLoadingWorkspace(true);
       setAuthenticated(true);
@@ -418,9 +435,10 @@ export const App: React.FC = () => {
             localStorage.setItem('slotmatrix_user_bio', session.bio || '');
           }
           if (session.photoUrl !== undefined) {
-            setCurrentUserPhotoUrl(session.photoUrl);
-            if (session.photoUrl) {
-              localStorage.setItem('slotmatrix_user_photo_url', session.photoUrl);
+            const initialPhoto = session.photoUrl ? `${session.photoUrl}?v=${Date.now()}` : null;
+            setCurrentUserPhotoUrl(initialPhoto);
+            if (initialPhoto) {
+              localStorage.setItem('slotmatrix_user_photo_url', initialPhoto);
             } else {
               localStorage.removeItem('slotmatrix_user_photo_url');
             }

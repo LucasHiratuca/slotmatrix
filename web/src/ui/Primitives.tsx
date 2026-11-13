@@ -47,6 +47,11 @@ export const Avatar: React.FC<{
   src?: string | null;
 }> = ({ name, size = 'sm', className = '', src }) => {
   const [imageError, setImageError] = useState(false);
+
+  useEffect(() => {
+    setImageError(false);
+  }, [src]);
+
   const initials = getInitials(name);
   const palette = AVATAR_MINERAL_PALETTES[hashName(name || 'User') % AVATAR_MINERAL_PALETTES.length];
   const sizeClass =

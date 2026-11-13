@@ -43,8 +43,22 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       setPhotoPreview(initialPhotoUrl);
       setErrorMsg(null);
       setSuccessMsg(null);
+
+      fetch('/api/me/profile', { credentials: 'include' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data) {
+            if (data.bio !== undefined && !initialBio) setBio(data.bio);
+            if (data.fotoUrl) {
+              const urlWithBuster = `${data.fotoUrl}?t=${Date.now()}`;
+              setPhotoPreview(urlWithBuster);
+              onProfileUpdated(data.bio || initialBio, urlWithBuster);
+            }
+          }
+        })
+        .catch(() => undefined);
     }
-  }, [isOpen, initialBio, initialPhotoUrl]);
+  }, [isOpen]);
 
   // Fechar com Escape
   useEffect(() => {
@@ -63,9 +77,21 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    const fileType = file.type || '';
-    if (!allowedTypes.includes(fileType)) {
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const validExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+    const validMimes = [
+      'image/jpeg',
+      'image/jpg',
+      'image/pjpeg',
+      'image/png',
+      'image/x-png',
+      'image/gif',
+      'image/webp',
+    ];
+    const isMimeValid = !file.type || validMimes.includes(file.type.toLowerCase());
+    const isExtValid = validExtensions.includes(ext);
+
+    if (!isExtValid && !isMimeValid) {
       setErrorMsg('Tipo de arquivo inválido. Formatos aceitos: JPEG, PNG, GIF ou WebP.');
       return;
     }
@@ -97,7 +123,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       const formData = new FormData();
       formData.append('bio', bio);
       if (photoFile) {
-        formData.append('foto', photoFile);
+        formData.append('foto', photoFile, photoFile.name);
       }
 
       const targetEndpoint = userId ? `/api/perfil/${userId}/editar` : '/api/me/profile';
@@ -114,12 +140,24 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       }
 
       setSuccessMsg('Perfil e foto atualizados com sucesso no Garage S3!');
-      const newPhotoUrl = data.fotoUrl || (photoFile ? `/api/perfil/${userId}/foto?t=${Date.now()}` : initialPhotoUrl);
-      onProfileUpdated(bio, newPhotoUrl);
+
+      const cacheBuster = `?t=${Date.now()}`;
+      let finalPhotoUrl: string | null = null;
+      if (data.fotoUrl) {
+        finalPhotoUrl = `${data.fotoUrl}${cacheBuster}`;
+      } else if (photoFile) {
+        const targetId = userId || data.userId;
+        finalPhotoUrl = targetId ? `/api/perfil/${targetId}/foto${cacheBuster}` : photoPreview;
+      } else {
+        finalPhotoUrl = photoPreview;
+      }
+
+      setPhotoPreview(finalPhotoUrl);
+      onProfileUpdated(bio, finalPhotoUrl);
 
       setTimeout(() => {
         onClose();
-      }, 1200);
+      }, 1000);
     } catch (err: any) {
       setErrorMsg(err.message || 'Erro ao salvar. Verifique sua conexão e tente novamente.');
     } finally {
@@ -232,7 +270,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/jpeg,image/png,image/gif,image/webp"
+                accept="image/jpeg,image/png,image/gif,image/webp,.jpg,.jpeg,.png,.gif,.webp"
                 onChange={handleFileChange}
                 className="hidden"
                 id="profile-photo-input"
@@ -241,7 +279,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isSaving}
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-canvas hover:bg-sunken border border-border-subtle text-[13px] font-medium text-ink-primary transition shadow-xs"
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-canvas hover:bg-sunken border border-border-subtle text-[13px] font-medium text-ink-primary transition shadow-xs cursor-pointer"
               >
                 <Camera className="w-4 h-4 text-ink-secondary" />
                 <span>{photoPreview ? 'Trocar foto...' : 'Escolher foto...'}</span>

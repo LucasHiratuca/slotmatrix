@@ -195,7 +195,16 @@ export class RemoveWorkspaceMemberUseCase {
   }
 }
 
-const TIPOS_PERMITIDOS_FOTO = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const TIPOS_PERMITIDOS_FOTO = [
+  'image/jpeg',
+  'image/jpg',
+  'image/pjpeg',
+  'image/png',
+  'image/x-png',
+  'image/gif',
+  'image/webp',
+];
+const EXTENSOES_PERMITIDAS_FOTO = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
 
 export class GetPerfilUseCase {
   constructor(
@@ -247,15 +256,20 @@ export class UpdatePerfilUseCase {
     let fotoKeyNova: string | undefined = undefined;
 
     if (input.file) {
-      if (!TIPOS_PERMITIDOS_FOTO.includes(input.file.mimetype)) {
+      const ext = input.file.originalname.split('.').pop()?.toLowerCase() || '';
+      const isMimeOk = TIPOS_PERMITIDOS_FOTO.includes((input.file.mimetype || '').toLowerCase());
+      const isExtOk = EXTENSOES_PERMITIDAS_FOTO.includes(ext);
+
+      if (!isMimeOk && !isExtOk) {
         throw new ValidationError('Tipo de arquivo inválido. Envie JPEG, PNG, GIF ou WebP.');
       }
       if (input.file.size > 5 * 1024 * 1024) {
         throw new ValidationError('Tamanho do arquivo excede o limite máximo de 5 MB.');
       }
-      const ext = input.file.originalname.split('.').pop()?.toLowerCase() || 'jpg';
-      fotoKeyNova = `usuario-${input.userId}/${randomBytes(16).toString('hex')}.${ext}`;
-      await this.d.uploadDocument(fotoKeyNova, input.file.buffer, input.file.mimetype);
+      const finalExt = isExtOk ? ext : 'jpg';
+      fotoKeyNova = `usuario-${input.userId}/${randomBytes(16).toString('hex')}.${finalExt}`;
+      const safeMime = isMimeOk ? input.file.mimetype : `image/${finalExt === 'jpg' ? 'jpeg' : finalExt}`;
+      await this.d.uploadDocument(fotoKeyNova, input.file.buffer, safeMime);
     }
 
     await this.d.perfis.save({
@@ -267,6 +281,7 @@ export class UpdatePerfilUseCase {
     return {
       ok: true,
       message: 'Perfil atualizado com sucesso!',
+      userId: input.userId,
       bio,
       fotoUrl: fotoKeyNova ? `/api/perfil/${input.userId}/foto` : undefined,
     };

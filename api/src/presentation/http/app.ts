@@ -160,7 +160,7 @@ export function createApp(c: Container) {
       } else {
         res.setHeader('Content-Type', 'image/jpeg');
       }
-      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.setHeader('Cache-Control', 'public, max-age=60, must-revalidate');
       const stream = await getDocumentStream(perfil.fotoKey);
       (stream as any).on('error', () => {
         if (!res.headersSent) {
@@ -180,6 +180,14 @@ export function createApp(c: Container) {
   });
   app.get('/perfil/:userId/foto', async (req, res) => {
     await handleFotoStream(req.params.userId, res);
+  });
+  app.get('/api/me/profile/photo', async (req, res) => {
+    try {
+      const actorId = await kit.authenticate(req);
+      await handleFotoStream(actorId, res);
+    } catch {
+      res.status(401).send('Não autenticado');
+    }
   });
 
   // ---------- Perfil: Atualização de bio e upload de foto para o Garage S3
