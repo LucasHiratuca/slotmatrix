@@ -12,16 +12,25 @@ import {
 } from 'lucide-react';
 import { Avatar } from './ui/Primitives';
 
+export interface RegisterData {
+  name: string;
+  email: string;
+  password: string;
+  workspaceName: string;
+}
+
 interface LoginViewProps {
   email: string;
   password: string;
   onEmailChange: (val: string) => void;
   onPasswordChange: (val: string) => void;
   onSubmit: (email: string, password: string) => Promise<void>;
+  onRegister?: (data: RegisterData) => Promise<void>;
   isLoggingIn: boolean;
   loginError: string | null;
   isDark: boolean;
   onToggleTheme: () => void;
+  initialMode?: 'login' | 'register';
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({
@@ -30,15 +39,29 @@ export const LoginView: React.FC<LoginViewProps> = ({
   onEmailChange,
   onPasswordChange,
   onSubmit,
+  onRegister,
   isLoggingIn,
   loginError,
   isDark,
   onToggleTheme,
+  initialMode = 'login',
 }) => {
   const emailInputRef = useRef<HTMLInputElement | null>(null);
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [mode, setMode] = useState<'login' | 'register'>(initialMode);
   const [showPassword, setShowPassword] = useState(false);
+  const [showRegPassword, setShowRegPassword] = useState(false);
   const [capsLockOn, setCapsLockOn] = useState(false);
+  const [regCapsLockOn, setRegCapsLockOn] = useState(false);
   const [showForgotHelp, setShowForgotHelp] = useState(false);
+
+  // Campos do formulário de cadastro
+  const [regName, setRegName] = useState('');
+  const [regWorkspaceName, setRegWorkspaceName] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [clientError, setClientError] = useState<string | null>(null);
 
   const isDemoMode =
     import.meta.env.VITE_DEMO_MODE === 'true' ||
@@ -46,9 +69,21 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
   useEffect(() => {
     if (loginError) {
+      if (mode === 'login') {
+        emailInputRef.current?.focus();
+      } else {
+        nameInputRef.current?.focus();
+      }
+    }
+  }, [loginError, mode]);
+
+  useEffect(() => {
+    if (mode === 'register') {
+      nameInputRef.current?.focus();
+    } else {
       emailInputRef.current?.focus();
     }
-  }, [loginError]);
+  }, [mode]);
 
   const handleKeyModifiers = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (typeof e.getModifierState === 'function') {
@@ -56,12 +91,71 @@ export const LoginView: React.FC<LoginViewProps> = ({
     }
   };
 
+  const handleRegKeyModifiers = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (typeof e.getModifierState === 'function') {
+      setRegCapsLockOn(e.getModifierState('CapsLock'));
+    }
+  };
+
   const formatHumanLoginError = (raw: string): string => {
-    if (/invalid|credencia|401|incorret|unauthorized|falha/i.test(raw)) {
+    if (/invalid|credencia|401|incorret|unauthorized|falha.*autentic/i.test(raw)) {
       return 'E-mail ou senha incorretos. Confira os dados e tente de novo.';
+    }
+    if (/e-?mail.*already.*register|e-?mail.*j.*cadastrad/i.test(raw)) {
+      return 'Este e-mail já está cadastrado. Faça login ou use outro e-mail.';
+    }
+    if (/password.*at least 8|senha.*m[ií]nimo 8/i.test(raw)) {
+      return 'A senha deve conter no mínimo 8 caracteres.';
     }
     return raw;
   };
+
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setClientError(null);
+
+    const trimmedName = regName.trim();
+    const trimmedWsName = regWorkspaceName.trim();
+    const trimmedEmail = regEmail.trim();
+    const pass = regPassword;
+
+    if (!trimmedName || trimmedName.length < 2) {
+      setClientError('Informe seu nome completo (mínimo de 2 caracteres).');
+      nameInputRef.current?.focus();
+      return;
+    }
+    if (!trimmedWsName || trimmedWsName.length < 2) {
+      setClientError('Informe o nome da clínica ou consultório (mínimo de 2 caracteres).');
+      return;
+    }
+    if (trimmedWsName.length > 80) {
+      setClientError('O nome da clínica deve ter no máximo 80 caracteres.');
+      return;
+    }
+    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setClientError('Informe um e-mail corporativo válido.');
+      return;
+    }
+    if (!pass || pass.length < 8) {
+      setClientError('A senha deve conter no mínimo 8 caracteres.');
+      return;
+    }
+
+    if (onRegister) {
+      try {
+        await onRegister({
+          name: trimmedName,
+          workspaceName: trimmedWsName,
+          email: trimmedEmail,
+          password: pass,
+        });
+      } catch (err: any) {
+        setClientError(formatHumanLoginError(err?.message || 'Falha ao realizar cadastro. Tente novamente.'));
+      }
+    }
+  };
+
+  const currentError = clientError || loginError;
 
   return (
     <div className="min-h-screen bg-canvas text-ink-primary flex flex-col lg:flex-row">
@@ -114,241 +208,493 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
         {/* Bloco Central: Formulário (centro óptico alinhado à coluna direita) */}
         <div className="w-full max-w-[390px] mx-auto my-auto py-4 sm:py-6 space-y-5">
-          <div className="space-y-1.5">
-            <h1 className="text-[24px] sm:text-[26px] font-semibold text-ink-primary leading-tight">
-              Bem-vindo de volta
-            </h1>
-            <p className="text-[14px] text-ink-secondary">
-              Entre com seu e-mail da clínica para abrir a agenda do dia.
-            </p>
+          {/* Alternador de Modo: Entrar / Cadastrar */}
+          <div
+            className="flex items-center p-1 bg-sunken rounded-xl border border-border-subtle max-w-[240px]"
+            role="tablist"
+            aria-label="Opções de autenticação"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'login'}
+              data-testid="tab-login"
+              onClick={() => {
+                setMode('login');
+                setClientError(null);
+              }}
+              className={`flex-1 py-1.5 px-3 text-[13px] rounded-lg transition cursor-pointer ${
+                mode === 'login'
+                  ? 'bg-surface text-ink-primary shadow-xs font-semibold'
+                  : 'text-ink-secondary hover:text-ink-primary font-medium'
+              }`}
+            >
+              Entrar
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'register'}
+              data-testid="tab-register"
+              onClick={() => {
+                setMode('register');
+                setClientError(null);
+              }}
+              className={`flex-1 py-1.5 px-3 text-[13px] rounded-lg transition cursor-pointer ${
+                mode === 'register'
+                  ? 'bg-surface text-ink-primary shadow-xs font-semibold'
+                  : 'text-ink-secondary hover:text-ink-primary font-medium'
+              }`}
+            >
+              Cadastrar
+            </button>
           </div>
 
-          {loginError && (
-            <div
-              role="alert"
-              data-testid="login-error-alert"
-              className="p-3.5 rounded-xl border bg-[var(--status-error-bg)] border-[var(--status-error-border)] text-[var(--status-error-text)] flex items-start gap-2.5 text-[13px]"
-            >
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" strokeWidth={1.75} />
-              <span>{formatHumanLoginError(loginError)}</span>
-            </div>
-          )}
-
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void onSubmit(email, password);
-            }}
-            className="space-y-4"
-            noValidate
-          >
-            <div>
-              <label
-                htmlFor="login-email-input"
-                className="block text-[13px] font-medium text-ink-primary mb-1.5"
-              >
-                E-mail corporativo
-              </label>
-              <input
-                ref={emailInputRef}
-                id="login-email-input"
-                type="email"
-                name="email"
-                autoComplete="username"
-                required
-                value={email}
-                onChange={(e) => onEmailChange(e.target.value)}
-                placeholder="nome@suaclinica.com.br"
-                className="w-full h-12 px-3.5 rounded-lg bg-surface border border-border-strong text-[14px] text-ink-primary placeholder:text-ink-muted focus:border-brand focus-visible:outline-2 focus-visible:outline-brand transition"
-              />
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label
-                  htmlFor="login-password-input"
-                  className="block text-[13px] font-medium text-ink-primary"
-                >
-                  Senha
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setShowForgotHelp((prev) => !prev)}
-                  className="text-[13px] text-brand hover:underline font-medium"
-                >
-                  Esqueceu a senha?
-                </button>
+          {mode === 'login' ? (
+            <>
+              <div className="space-y-1.5">
+                <h1 className="text-[24px] sm:text-[26px] font-semibold text-ink-primary leading-tight">
+                  Bem-vindo de volta
+                </h1>
+                <p className="text-[14px] text-ink-secondary">
+                  Entre com seu e-mail da clínica para abrir a agenda do dia.
+                </p>
               </div>
 
-              <div className="relative">
-                <input
-                  id="login-password-input"
-                  type={showPassword ? 'text' : 'password'}
-                  name="password"
-                  autoComplete="current-password"
-                  required
-                  value={password}
-                  onChange={(e) => onPasswordChange(e.target.value)}
-                  onKeyUp={handleKeyModifiers}
-                  onKeyDown={handleKeyModifiers}
-                  placeholder="Digite sua senha"
-                  className="w-full h-12 pl-3.5 pr-24 rounded-lg bg-surface border border-border-strong text-[14px] text-ink-primary placeholder:text-ink-muted focus:border-brand focus-visible:outline-2 focus-visible:outline-brand transition"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((prev) => !prev)}
-                  aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-ink-secondary hover:text-ink-primary hover:bg-sunken inline-flex items-center gap-1 transition"
+              {currentError && (
+                <div
+                  role="alert"
+                  data-testid="login-error-alert"
+                  className="p-3.5 rounded-xl border bg-[var(--status-error-bg)] border-[var(--status-error-border)] text-[var(--status-error-text)] flex items-start gap-2.5 text-[13px]"
                 >
-                  {showPassword ? (
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" strokeWidth={1.75} />
+                  <span>{formatHumanLoginError(currentError)}</span>
+                </div>
+              )}
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void onSubmit(email, password);
+                }}
+                className="space-y-4"
+                noValidate
+              >
+                <div>
+                  <label
+                    htmlFor="login-email-input"
+                    className="block text-[13px] font-medium text-ink-primary mb-1.5"
+                  >
+                    E-mail corporativo
+                  </label>
+                  <input
+                    ref={emailInputRef}
+                    id="login-email-input"
+                    type="email"
+                    name="email"
+                    autoComplete="username"
+                    required
+                    value={email}
+                    onChange={(e) => onEmailChange(e.target.value)}
+                    placeholder="nome@suaclinica.com.br"
+                    className="w-full h-12 px-3.5 rounded-lg bg-surface border border-border-strong text-[14px] text-ink-primary placeholder:text-ink-muted focus:border-brand focus-visible:outline-2 focus-visible:outline-brand transition"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label
+                      htmlFor="login-password-input"
+                      className="block text-[13px] font-medium text-ink-primary"
+                    >
+                      Senha
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotHelp((prev) => !prev)}
+                      className="text-[13px] text-brand hover:underline font-medium"
+                    >
+                      Esqueceu a senha?
+                    </button>
+                  </div>
+
+                  <div className="relative">
+                    <input
+                      id="login-password-input"
+                      type={showPassword ? 'text' : 'password'}
+                      name="password"
+                      autoComplete="current-password"
+                      required
+                      value={password}
+                      onChange={(e) => onPasswordChange(e.target.value)}
+                      onKeyUp={handleKeyModifiers}
+                      onKeyDown={handleKeyModifiers}
+                      placeholder="Digite sua senha"
+                      className="w-full h-12 pl-3.5 pr-24 rounded-lg bg-surface border border-border-strong text-[14px] text-ink-primary placeholder:text-ink-muted focus:border-brand focus-visible:outline-2 focus-visible:outline-brand transition"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-ink-secondary hover:text-ink-primary hover:bg-sunken inline-flex items-center gap-1 transition"
+                    >
+                      {showPassword ? (
+                        <>
+                          <EyeOff className="w-3.5 h-3.5" strokeWidth={1.6} />
+                          <span>Ocultar</span>
+                        </>
+                      ) : (
+                        <>
+                          <Eye className="w-3.5 h-3.5" strokeWidth={1.6} />
+                          <span>Mostrar</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {capsLockOn && (
+                    <div
+                      role="status"
+                      className="mt-1.5 flex items-center gap-1.5 text-[13px] text-[var(--status-pending-text)]"
+                    >
+                      <KeyRound className="w-3.5 h-3.5 shrink-0" />
+                      <span>O Caps Lock está ativado.</span>
+                    </div>
+                  )}
+
+                  {showForgotHelp && (
+                    <div className="mt-2 p-3 rounded-lg bg-sunken border border-border-subtle text-[13px] text-ink-secondary leading-relaxed">
+                      Por segurança clínica, a redefinição de senha é feita pela administração da sua unidade (Proprietária ou Administração).
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isLoggingIn}
+                  className="w-full h-12 rounded-lg bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] active:translate-y-[0.5px] text-white font-semibold text-[15px] shadow-sm ring-1 ring-inset ring-white/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:bg-sunken disabled:text-ink-muted disabled:ring-0 disabled:shadow-none disabled:cursor-not-allowed transition flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {isLoggingIn ? (
                     <>
-                      <EyeOff className="w-3.5 h-3.5" strokeWidth={1.6} />
-                      <span>Ocultar</span>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Entrando...</span>
                     </>
                   ) : (
-                    <>
-                      <Eye className="w-3.5 h-3.5" strokeWidth={1.6} />
-                      <span>Mostrar</span>
-                    </>
+                    <span>Entrar</span>
                   )}
                 </button>
+
+                <div className="pt-2 text-center text-[13px] text-ink-secondary">
+                  <span>Não tem uma conta? </span>
+                  <button
+                    type="button"
+                    data-testid="toggle-to-register"
+                    onClick={() => {
+                      setMode('register');
+                      setClientError(null);
+                    }}
+                    className="text-brand hover:underline font-semibold cursor-pointer"
+                  >
+                    Cadastre sua clínica
+                  </button>
+                </div>
+              </form>
+
+              {/* Contas de demonstração recolhidas em acordeão (VITE_DEMO_MODE) */}
+              {isDemoMode && (
+                <details className="group pt-3 border-t border-border-subtle">
+                  <summary className="list-none cursor-pointer flex items-center justify-between py-1.5 text-[13px] font-medium text-ink-secondary hover:text-ink-primary select-none">
+                    <span>Explorar com uma conta de demonstração</span>
+                    <ChevronDown className="w-4 h-4 text-ink-muted transition-transform group-open:rotate-180" />
+                  </summary>
+
+                  <div className="mt-2.5 space-y-2">
+                    <button
+                      type="button"
+                      disabled={isLoggingIn}
+                      onClick={() => void onSubmit('owner@vitascan.test', 'Passw0rd!')}
+                      className="w-full text-left p-2.5 rounded-xl bg-canvas hover:bg-brand-tint/50 border border-border-subtle transition flex items-center justify-between gap-2"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Avatar name="Dra. Renata Silveira" size="sm" />
+                        <div className="min-w-0">
+                          <div className="text-[13px] font-semibold text-ink-primary truncate">
+                            Dra. Renata Silveira · Proprietária
+                          </div>
+                          <div className="text-[12px] text-ink-secondary truncate">
+                            VitaScan Diagnósticos (Proprietário(a) · Plano Pro)
+                          </div>
+                        </div>
+                      </div>
+                      <span className="px-2 py-0.5 text-[12px] font-medium rounded-md bg-brand-tint text-brand-tint-text shrink-0">
+                        Plano Pro
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isLoggingIn}
+                      onClick={() => void onSubmit('owner@aura.test', 'Passw0rd!')}
+                      className="w-full text-left p-2.5 rounded-xl bg-canvas hover:bg-sunken border border-border-subtle transition flex items-center justify-between gap-2"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Avatar name="Clara Mendes" size="sm" />
+                        <div className="min-w-0">
+                          <div className="text-[13px] font-semibold text-ink-primary truncate">
+                            Clara Mendes · Proprietária
+                          </div>
+                          <div className="text-[12px] text-ink-secondary truncate">
+                            Estúdio Aura (Proprietário(a) · Plano Starter)
+                          </div>
+                        </div>
+                      </div>
+                      <span className="px-2 py-0.5 text-[12px] font-medium rounded-md bg-[var(--status-pending-bg)] text-[var(--status-pending-text)] border border-[var(--status-pending-border)] shrink-0 tabular-nums">
+                        5 de 5
+                      </span>
+                    </button>
+
+                    <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+                      <button
+                        type="button"
+                        disabled={isLoggingIn}
+                        onClick={() => void onSubmit('admin@vitascan.test', 'Passw0rd!')}
+                        className="text-left p-2 rounded-lg bg-canvas hover:bg-sunken border border-border-subtle transition"
+                      >
+                        <div className="text-[12px] font-semibold text-ink-primary truncate">
+                          Marcos V.
+                        </div>
+                        <div className="text-[12px] text-ink-secondary truncate">
+                          Administração
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isLoggingIn}
+                        onClick={() => void onSubmit('coord@vitascan.test', 'Passw0rd!')}
+                        className="text-left p-2 rounded-lg bg-canvas hover:bg-sunken border border-border-subtle transition"
+                      >
+                        <div className="text-[12px] font-semibold text-ink-primary truncate">
+                          Helena Prado
+                        </div>
+                        <div className="text-[12px] text-ink-secondary truncate">
+                          Coordenação
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isLoggingIn}
+                        onClick={() => void onSubmit('spec@vitascan.test', 'Passw0rd!')}
+                        className="text-left p-2 rounded-lg bg-canvas hover:bg-sunken border border-border-subtle transition"
+                      >
+                        <div className="text-[12px] font-semibold text-ink-primary truncate">
+                          Dra. Camila
+                        </div>
+                        <div className="text-[12px] text-ink-secondary truncate">
+                          Especialista
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                </details>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="space-y-1.5">
+                <h1 className="text-[24px] sm:text-[26px] font-semibold text-ink-primary leading-tight">
+                  Crie sua clínica
+                </h1>
+                <p className="text-[14px] text-ink-secondary">
+                  Cadastre seu usuário e sua clínica para iniciar o teste gratuito.
+                </p>
               </div>
 
-              {capsLockOn && (
+              {currentError && (
                 <div
-                  role="status"
-                  className="mt-1.5 flex items-center gap-1.5 text-[13px] text-[var(--status-pending-text)]"
+                  role="alert"
+                  data-testid="login-error-alert"
+                  className="p-3.5 rounded-xl border bg-[var(--status-error-bg)] border-[var(--status-error-border)] text-[var(--status-error-text)] flex items-start gap-2.5 text-[13px]"
                 >
-                  <KeyRound className="w-3.5 h-3.5 shrink-0" />
-                  <span>O Caps Lock está ativado.</span>
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" strokeWidth={1.75} />
+                  <span>{formatHumanLoginError(currentError)}</span>
                 </div>
               )}
 
-              {showForgotHelp && (
-                <div className="mt-2 p-3 rounded-lg bg-sunken border border-border-subtle text-[13px] text-ink-secondary leading-relaxed">
-                  Por segurança clínica, a redefinição de senha é feita pela administração da sua unidade (Proprietária ou Administração).
+              <form
+                onSubmit={handleRegisterSubmit}
+                className="space-y-3.5"
+                noValidate
+              >
+                <div>
+                  <label
+                    htmlFor="register-name-input"
+                    className="block text-[13px] font-medium text-ink-primary mb-1"
+                  >
+                    Nome completo
+                  </label>
+                  <input
+                    ref={nameInputRef}
+                    id="register-name-input"
+                    data-testid="register-name-input"
+                    type="text"
+                    name="name"
+                    autoComplete="name"
+                    required
+                    value={regName}
+                    onChange={(e) => {
+                      setRegName(e.target.value);
+                      setClientError(null);
+                    }}
+                    placeholder="Dra. Renata Silveira"
+                    className="w-full h-11 px-3.5 rounded-lg bg-surface border border-border-strong text-[14px] text-ink-primary placeholder:text-ink-muted focus:border-brand focus-visible:outline-2 focus-visible:outline-brand transition"
+                  />
                 </div>
-              )}
-            </div>
 
-            <button
-              type="submit"
-              disabled={isLoggingIn}
-              className="w-full h-12 rounded-lg bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] active:translate-y-[0.5px] text-white font-semibold text-[15px] shadow-sm ring-1 ring-inset ring-white/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:bg-sunken disabled:text-ink-muted disabled:ring-0 disabled:shadow-none disabled:cursor-not-allowed transition flex items-center justify-center gap-2 cursor-pointer"
-            >
-              {isLoggingIn ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Entrando...</span>
-                </>
-              ) : (
-                <span>Entrar</span>
-              )}
-            </button>
-          </form>
+                <div>
+                  <label
+                    htmlFor="register-workspace-name-input"
+                    className="block text-[13px] font-medium text-ink-primary mb-1"
+                  >
+                    Nome da clínica ou consultório
+                  </label>
+                  <input
+                    id="register-workspace-name-input"
+                    data-testid="register-workspace-name-input"
+                    type="text"
+                    name="workspaceName"
+                    required
+                    value={regWorkspaceName}
+                    onChange={(e) => {
+                      setRegWorkspaceName(e.target.value);
+                      setClientError(null);
+                    }}
+                    placeholder="Ex: VitaScan Diagnósticos"
+                    className="w-full h-11 px-3.5 rounded-lg bg-surface border border-border-strong text-[14px] text-ink-primary placeholder:text-ink-muted focus:border-brand focus-visible:outline-2 focus-visible:outline-brand transition"
+                  />
+                </div>
 
-          {/* Contas de demonstração recolhidas em acordeão (VITE_DEMO_MODE) */}
-          {isDemoMode && (
-            <details className="group pt-3 border-t border-border-subtle">
-              <summary className="list-none cursor-pointer flex items-center justify-between py-1.5 text-[13px] font-medium text-ink-secondary hover:text-ink-primary select-none">
-                <span>Explorar com uma conta de demonstração</span>
-                <ChevronDown className="w-4 h-4 text-ink-muted transition-transform group-open:rotate-180" />
-              </summary>
+                <div>
+                  <label
+                    htmlFor="register-email-input"
+                    className="block text-[13px] font-medium text-ink-primary mb-1"
+                  >
+                    E-mail corporativo
+                  </label>
+                  <input
+                    id="register-email-input"
+                    data-testid="register-email-input"
+                    type="email"
+                    name="email"
+                    autoComplete="email"
+                    required
+                    value={regEmail}
+                    onChange={(e) => {
+                      setRegEmail(e.target.value);
+                      setClientError(null);
+                    }}
+                    placeholder="nome@suaclinica.com.br"
+                    className="w-full h-11 px-3.5 rounded-lg bg-surface border border-border-strong text-[14px] text-ink-primary placeholder:text-ink-muted focus:border-brand focus-visible:outline-2 focus-visible:outline-brand transition"
+                  />
+                </div>
 
-              <div className="mt-2.5 space-y-2">
-                <button
-                  type="button"
-                  disabled={isLoggingIn}
-                  onClick={() => void onSubmit('owner@vitascan.test', 'Passw0rd!')}
-                  className="w-full text-left p-2.5 rounded-xl bg-canvas hover:bg-brand-tint/50 border border-border-subtle transition flex items-center justify-between gap-2"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <Avatar name="Dra. Renata Silveira" size="sm" />
-                    <div className="min-w-0">
-                      <div className="text-[13px] font-semibold text-ink-primary truncate">
-                        Dra. Renata Silveira · Proprietária
-                      </div>
-                      <div className="text-[12px] text-ink-secondary truncate">
-                        VitaScan Diagnósticos (Proprietário(a) · Plano Pro)
-                      </div>
-                    </div>
+                <div>
+                  <label
+                    htmlFor="register-password-input"
+                    className="block text-[13px] font-medium text-ink-primary mb-1"
+                  >
+                    Senha (mínimo de 8 caracteres)
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="register-password-input"
+                      data-testid="register-password-input"
+                      type={showRegPassword ? 'text' : 'password'}
+                      name="password"
+                      autoComplete="new-password"
+                      required
+                      value={regPassword}
+                      onChange={(e) => {
+                        setRegPassword(e.target.value);
+                        setClientError(null);
+                      }}
+                      onKeyUp={handleRegKeyModifiers}
+                      onKeyDown={handleRegKeyModifiers}
+                      placeholder="Crie uma senha forte"
+                      className="w-full h-11 pl-3.5 pr-24 rounded-lg bg-surface border border-border-strong text-[14px] text-ink-primary placeholder:text-ink-muted focus:border-brand focus-visible:outline-2 focus-visible:outline-brand transition"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowRegPassword((prev) => !prev)}
+                      aria-label={showRegPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1 rounded-md text-[13px] font-medium text-ink-secondary hover:text-ink-primary hover:bg-sunken inline-flex items-center gap-1 transition"
+                    >
+                      {showRegPassword ? (
+                        <>
+                          <EyeOff className="w-3.5 h-3.5" strokeWidth={1.6} />
+                          <span>Ocultar</span>
+                        </>
+                      ) : (
+                        <>
+                          <Eye className="w-3.5 h-3.5" strokeWidth={1.6} />
+                          <span>Mostrar</span>
+                        </>
+                      )}
+                    </button>
                   </div>
-                  <span className="px-2 py-0.5 text-[12px] font-medium rounded-md bg-brand-tint text-brand-tint-text shrink-0">
-                    Plano Pro
-                  </span>
+
+                  {regCapsLockOn && (
+                    <div
+                      role="status"
+                      className="mt-1 flex items-center gap-1.5 text-[12px] text-[var(--status-pending-text)]"
+                    >
+                      <KeyRound className="w-3.5 h-3.5 shrink-0" />
+                      <span>O Caps Lock está ativado.</span>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  data-testid="register-submit-button"
+                  disabled={isLoggingIn}
+                  className="w-full h-12 rounded-lg bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] active:translate-y-[0.5px] text-white font-semibold text-[15px] shadow-sm ring-1 ring-inset ring-white/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:bg-sunken disabled:text-ink-muted disabled:ring-0 disabled:shadow-none disabled:cursor-not-allowed transition flex items-center justify-center gap-2 cursor-pointer mt-2"
+                >
+                  {isLoggingIn ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Criando clínica...</span>
+                    </>
+                  ) : (
+                    <span>Criar clínica e começar</span>
+                  )}
                 </button>
 
-                <button
-                  type="button"
-                  disabled={isLoggingIn}
-                  onClick={() => void onSubmit('owner@aura.test', 'Passw0rd!')}
-                  className="w-full text-left p-2.5 rounded-xl bg-canvas hover:bg-sunken border border-border-subtle transition flex items-center justify-between gap-2"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <Avatar name="Clara Mendes" size="sm" />
-                    <div className="min-w-0">
-                      <div className="text-[13px] font-semibold text-ink-primary truncate">
-                        Clara Mendes · Proprietária
-                      </div>
-                      <div className="text-[12px] text-ink-secondary truncate">
-                        Estúdio Aura (Proprietário(a) · Plano Starter)
-                      </div>
-                    </div>
-                  </div>
-                  <span className="px-2 py-0.5 text-[12px] font-medium rounded-md bg-[var(--status-pending-bg)] text-[var(--status-pending-text)] border border-[var(--status-pending-border)] shrink-0 tabular-nums">
-                    5 de 5
-                  </span>
-                </button>
-
-                <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+                <div className="pt-2 text-center text-[13px] text-ink-secondary">
+                  <span>Já possui uma conta? </span>
                   <button
                     type="button"
-                    disabled={isLoggingIn}
-                    onClick={() => void onSubmit('admin@vitascan.test', 'Passw0rd!')}
-                    className="text-left p-2 rounded-lg bg-canvas hover:bg-sunken border border-border-subtle transition"
+                    data-testid="toggle-to-login"
+                    onClick={() => {
+                      setMode('login');
+                      setClientError(null);
+                    }}
+                    className="text-brand hover:underline font-semibold cursor-pointer"
                   >
-                    <div className="text-[12px] font-semibold text-ink-primary truncate">
-                      Marcos V.
-                    </div>
-                    <div className="text-[12px] text-ink-secondary truncate">
-                      Administração
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isLoggingIn}
-                    onClick={() => void onSubmit('coord@vitascan.test', 'Passw0rd!')}
-                    className="text-left p-2 rounded-lg bg-canvas hover:bg-sunken border border-border-subtle transition"
-                  >
-                    <div className="text-[12px] font-semibold text-ink-primary truncate">
-                      Helena Prado
-                    </div>
-                    <div className="text-[12px] text-ink-secondary truncate">
-                      Coordenação
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isLoggingIn}
-                    onClick={() => void onSubmit('spec@vitascan.test', 'Passw0rd!')}
-                    className="text-left p-2 rounded-lg bg-canvas hover:bg-sunken border border-border-subtle transition"
-                  >
-                    <div className="text-[12px] font-semibold text-ink-primary truncate">
-                      Dra. Camila
-                    </div>
-                    <div className="text-[12px] text-ink-secondary truncate">
-                      Especialista
-                    </div>
+                    Fazer login
                   </button>
                 </div>
-              </div>
-            </details>
+              </form>
+            </>
           )}
         </div>
 
         {/* Rodapé útil da coluna esquerda */}
         <div className="hidden sm:flex items-center justify-center lg:justify-start text-[13px] text-ink-secondary">
-          <span>Problemas para entrar? Fale com o administrador da clínica.</span>
+          <span>
+            {mode === 'login'
+              ? 'Problemas para entrar? Fale com o administrador da clínica.'
+              : 'Período de teste sem custos e sem fidelidade.'}
+          </span>
         </div>
       </div>
 

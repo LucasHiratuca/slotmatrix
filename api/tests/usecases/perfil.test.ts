@@ -65,7 +65,7 @@ describe('Perfil do Usuário & Object Storage (Garage S3 / MinIO)', () => {
     const fotoRes = await request(app).get(`/api/perfil/${userId}/foto`);
     expect(fotoRes.status).toBe(200);
     expect(fotoRes.header['content-type']).toContain('image/png');
-    expect(fotoRes.header['cache-control']).toBe('public, max-age=3600');
+    expect(fotoRes.header['cache-control']).toBe('public, max-age=60, must-revalidate');
     expect(fotoRes.body.length).toBe(pngBuffer.length);
   });
 

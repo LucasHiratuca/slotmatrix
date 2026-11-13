@@ -307,6 +307,83 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleRegister = async (data: {
+    name: string;
+    email: string;
+    password: string;
+    workspaceName: string;
+  }) => {
+    setLoginError(null);
+    setWorkspaceLoadError(null);
+    setIsLoggingIn(true);
+    try {
+      const res = await apiRequest<{
+        token: string;
+        userId: string;
+        workspaceId: string;
+        email?: string;
+        name?: string;
+        workspaces?: WorkspaceSummary[];
+      }>('/auth/register', {
+        method: 'POST',
+        body: data,
+      });
+
+      let wsList = Array.isArray(res.workspaces) ? res.workspaces : [];
+      if (wsList.length === 0 && res.workspaceId) {
+        wsList = [
+          {
+            id: res.workspaceId,
+            name: data.workspaceName,
+            slug: data.workspaceName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+            plan: 'STARTER',
+            role: 'OWNER',
+            subscriptionStatus: 'TRIALING',
+          },
+        ];
+      }
+      const preferred = wsList[0];
+
+      // Segurança: JWT é mantido exclusivamente em cookie HttpOnly (não em localStorage)
+      localStorage.removeItem('slotmatrix_token');
+      localStorage.setItem('slotmatrix_user_email', res.email ?? data.email);
+      if (res.name ?? data.name) {
+        localStorage.setItem('slotmatrix_user_name', res.name ?? data.name);
+      }
+      if (res.userId) {
+        setCurrentUserId(res.userId);
+        localStorage.setItem('slotmatrix_user_id', res.userId);
+      }
+
+      setOverview(null);
+      setIsLoadingWorkspace(true);
+      setAuthenticated(true);
+      setCurrentUserEmail(res.email ?? data.email);
+      setCurrentUserName(res.name ?? data.name);
+      setWorkspaces(wsList);
+
+      if (preferred) {
+        localStorage.setItem('slotmatrix_workspace_id', preferred.id);
+        setActiveWorkspaceId(preferred.id);
+      } else if (res.workspaceId) {
+        localStorage.setItem('slotmatrix_workspace_id', res.workspaceId);
+        setActiveWorkspaceId(res.workspaceId);
+      } else {
+        localStorage.removeItem('slotmatrix_workspace_id');
+        setActiveWorkspaceId(null);
+        setIsLoadingWorkspace(false);
+        setWorkspaceLoadError('Nenhuma clínica foi encontrada para esta conta.');
+      }
+    } catch (err: any) {
+      setIsLoadingWorkspace(false);
+      const errMsg = formatApiError(err.message ?? 'Falha no cadastro');
+      setLoginError(errMsg);
+      throw new Error(errMsg);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
   const refreshWorkspaceData = useCallback(
     async (silent = false) => {
       if (!authenticated) return;
@@ -566,6 +643,7 @@ export const App: React.FC = () => {
         onEmailChange={setEmail}
         onPasswordChange={setPassword}
         onSubmit={handleLogin}
+        onRegister={handleRegister}
         isLoggingIn={isLoggingIn}
         loginError={loginError}
         isDark={theme === 'dark'}

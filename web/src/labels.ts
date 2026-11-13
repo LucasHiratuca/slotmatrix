@@ -289,7 +289,13 @@ export function formatApiError(
   if (status === 403 || code === 'FORBIDDEN') {
     return 'Seu perfil de acesso não possui permissão para realizar esta ação. Solicite apoio a um administrador da clínica.';
   }
-  if (status === 409 || code === 'CONFLICT' || code === 'RESOURCE_CONFLICT') {
+  if (/e-?mail.*already.*register|e-?mail.*j.*cadastrad/i.test(rawMessage)) {
+    return 'Este e-mail já está cadastrado. Faça login ou use outro e-mail.';
+  }
+  if (/password.*at least 8|senha.*m[ií]nimo 8/i.test(rawMessage)) {
+    return 'A senha deve conter no mínimo 8 caracteres.';
+  }
+  if (code === 'RESOURCE_CONFLICT' || (status === 409 && !/e-?mail/i.test(rawMessage)) || (code === 'CONFLICT' && !/e-?mail/i.test(rawMessage))) {
     return 'Este horário acabou de ser ocupado em um dos recursos necessários. Escolha outro horário disponível.';
   }
   // Remove nomes técnicos internos caso venham na mensagem do backend

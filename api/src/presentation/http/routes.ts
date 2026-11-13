@@ -100,7 +100,13 @@ export function registerRoutes(kit: RouterKit, c: Container) {
     handler: async ({ req, res, body }) => {
       const r = await tenancy.register.execute(body);
       setSessionCookie(req, res, r.token, c.config.appPublicUrl);
-      return r;
+      const workspaces = await q.workspace.listForUser(r.userId);
+      return {
+        ...r,
+        email: body.email,
+        name: body.name,
+        workspaces,
+      };
     },
   });
 
