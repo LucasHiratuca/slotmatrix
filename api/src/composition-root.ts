@@ -196,7 +196,7 @@ export function buildContainer(infra: Infrastructure, config: AppConfig) {
   const audit = new OnDomainEventAuditHandler({ audit: infra.auditLogs });
   for (const name of AUDITED_EVENTS) dispatcher.register(name, audit);
 
-  const stripeGateway = new StripeBillingGateway(config.stripeSecretKey, config.stripeWebhookSecret);
+  const stripeGateway = new StripeBillingGateway(config.stripeSecretKey, config.stripeWebhookSecret, { isProduction: config.isProduction });
 
   return { infra, config, dispatcher, entitlements, tenancy, catalog, scheduling, queries, billing, acl, stripeGateway };
 }

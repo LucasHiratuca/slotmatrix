@@ -53,6 +53,7 @@ export class WorkspaceReadService {
         status: sub.status,
         trialEndsAt: sub.trialEndsAt,
         currentPeriodEnd: sub.currentPeriodEnd,
+        externalCustomerId: sub.externalCustomerId,
       },
       entitlements: ent,
       quota: {

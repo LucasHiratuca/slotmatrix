@@ -135,7 +135,7 @@ As atividades 7 e 8 foram desenvolvidas e consolidadas no repositório inicial d
 
 Na Atividade 9, em estrito cumprimento às instruções metodológicas, o repositório original foi espelhado para um novo repositório dedicado exclusivamente ao produto (`LucasHiratuca/slotmatrix`) por meio dos comandos `git clone --bare` seguido de `git push --mirror`. Essa técnica preservou 100% da integridade do grafo de histórico (31 commits anteriores desde agosto), permitindo a continuidade direta do trabalho sem quebra de rastreabilidade.
 
-Nas Atividades 10 e 11, o SaaS evoluiu na mesma stack do Portainer e sob a mesma infraestrutura de contêineres na máquina virtual da Fatec, aproveitando as instâncias do MariaDB 11.4 e Redis 7 (enquanto o Object Storage S3 utilizado na P1 ficou restrito ao sistema legado do catálogo). A metodologia de desenvolvimento combinou TypeScript estruturado em Domain-Driven Design (DDD), testes automatizados integrados com Vitest, documentação interativa OpenAPI 3.0 (Swagger) e front-end responsivo em React 18 / Vite.
+Nas Atividades 10 e 11, o SaaS evoluiu na mesma stack do Portainer e sob a mesma infraestrutura de contêineres na máquina virtual da Fatec, aproveitando as instâncias do MariaDB 11.4, Redis 7 e Garage S3 / MinIO (para persistência de fotos de perfil e anexos clínicos). A metodologia de desenvolvimento combinou TypeScript estruturado em Domain-Driven Design (DDD), testes automatizados integrados com Vitest, documentação interativa OpenAPI 3.0 (Swagger) e front-end responsivo em React 18 / Vite.
 
 Todas as datas e horários apresentados no Quadro de Entregas foram extraídos diretamente do histórico criptográfico do Git (`git log`), auditados nas páginas de commit do GitHub e registrados nas respectivas issues de entrega endereçadas ao professor `\@siriani`.
 
@@ -158,6 +158,7 @@ A arquitetura do *SlotMatrix* é composta por microsserviços desacoplados inter
   [slotmatrix_worker], [Processamento em segundo plano e expiração de ofertas de waitlist], [Node.js 20 + BullMQ], [Não (interno)],
   [slotmatrix_db], [Persistência transacional multi-tenant, quotas de planos e auditoria], [MariaDB 11.4], [Não (:3306 int.)],
   [slotmatrix_redis], [Fila BullMQ para expiração temporizada e Redis Streams de auditoria], [Redis 7 Alpine], [Não (:6379 int.)],
+  [Garage S3 / MinIO], [Armazenamento seguro de fotos de perfil e anexos clínicos], [Garage v0.9 / MinIO API], [Não (:3900 int.)],
   [Stripe (externo)], [Checkout de assinaturas recorrentes, portal do cliente e webhooks], [Serviço SaaS externo], [Webhook → API],
 )
 
@@ -168,13 +169,13 @@ O sistema está implantado na infraestrutura de nuvem virtualizada da Fatec Pomp
 - *Nome da Stack:* `slotmatrix`
 - *Repositório de Origem:* `https://github.com/LucasHiratuca/slotmatrix` (branch `main`)
 - *Containers Ativos e Limites Operacionais:*
-  - `slotmatrix_db`: MariaDB 11.4 com volume persistente `slotmatrix_db_data` (healthcheck com `healthcheck.sh`).
-  - `slotmatrix_redis`: Redis 7 Alpine com persistência append-only em `slotmatrix_redis_data`.
-  - `slotmatrix_api`: Node.js 20 Alpine com liveness probe em `GET /api/health`.
-  - `slotmatrix_worker`: Worker BullMQ executando comandos em segundo plano.
-  - `slotmatrix_web`: Nginx servindo o bundle estático da aplicação React e atuando como proxy reverso para `/api`.
-- *Variáveis de Ambiente da Stack (Nomes):* `PORT`, `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `BILLING_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `APP_PUBLIC_URL`, `AUTO_SEED`.
-- *URL Pública:* Console Web em `http://localhost:18174` e Swagger interativo em `http://localhost:18081/api/docs`.
+  - `slotmatrix_db`: MariaDB 11.4 com volume persistente `slotmatrix_db_data` (limite de memória: 512 MB; healthcheck com `healthcheck.sh`).
+  - `slotmatrix_redis`: Redis 7 Alpine com persistência append-only em `slotmatrix_redis_data` (limite de memória: 256 MB).
+  - `slotmatrix_api`: Node.js 20 Alpine com liveness probe em `GET /api/health` (limite de memória: 512 MB).
+  - `slotmatrix_worker`: Worker BullMQ executando comandos em segundo plano (limite de memória: 256 MB).
+  - `slotmatrix_web`: Nginx servindo o bundle estático da aplicação React e atuando como proxy reverso para `/api` (limite de memória: 128 MB).
+- *Variáveis de Ambiente da Stack (Nomes):* `NODE_ENV`, `PORT`, `APP_PUBLIC_URL`, `CORS_ORIGINS`, `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `BILLING_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_USE_SSL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `SMTP_SECURE`, `AUTO_SEED`, `ENABLE_API_DOCS`.
+- *URL Pública e Acesso:* Console Web no ar via proxy reverso no domínio da VM (`http://localhost:18174` em desenvolvimento local) e documentação interativa Swagger em `/api/docs` (`http://localhost:18081/api/docs`).
 
 == Fluxo de uma requisição
 
@@ -250,6 +251,7 @@ O sistema conta com um conjunto completo de ferramentas de observabilidade e doc
 - *Health Checks de Liveness:* Endpoint `GET /api/health` monitorado continuamente pelo Docker daemon a cada 10 segundos para reinicialização preventiva de containers degradados.
 - *Documentação Interativa OpenAPI 3.0 (Swagger):* Disponibilizada publicamente em `http://localhost:18081/api/docs`, detalhando schemas de entrada e saída com validação Zod.
 - *Suíte de Testes Automatizados (Vitest):* 16 suítes totalizando 103 testes automatizados (70 no backend e 33 no frontend), cobrindo a integridade dos agregados, controle RBAC, cálculo do MRR, bloqueio de quotas, tratamento idempotente dos 4 eventos de webhook da Stripe e a máquina de estados das reservas.
+- *Pipeline de CI/CD:* Não foi implementado pipeline automatizado em nuvem via GitHub Actions; a validação contínua e a prevenção de regressão foram asseguradas localmente pela execução automatizada da suíte Vitest pré-commits e pela verificação preventiva de liveness pelo Docker daemon.
 
 == Camadas IaaS, PaaS e SaaS do projeto
 
@@ -324,7 +326,7 @@ O sistema conta com um conjunto completo de ferramentas de observabilidade e doc
   realizada: "07/11/2026 12:24",
   situacao: "entregue com atraso",
   evidencia-desc: "GitHub — issue de entrega (\@siriani) + repositório novo + README do produto + histórico espelhado",
-  url: "https://github.com/LucasHiratuca/slotmatrix",
+  url: "https://github.com/LucasHiratuca/slotmatrix/issues/1",
 )[
   *O que foi feito.* Transição formal do catálogo de filmes para um modelo de negócio B2B autêntico: o *SlotMatrix*. O repositório original foi espelhado via terminal (`git clone --bare` + `git push --mirror`) para o novo repositório `LucasHiratuca/slotmatrix`, preservando integralmente 31 commits históricos. No `README.md`, foi estruturado o plano de negócio completo: a dor real de centros diagnósticos e cirúrgicos (conflitos de salas e no-show de 20%), a persona (Dra. Renata Silveira, diretora clínica), a proposta de valor de alocação atômica multi-recurso, a precificação preliminar (Starter, Pro R\$ 349/mês, Enterprise R\$ 890/mês), o Lean Canvas em 9 blocos e o mapa detalhado de reaproveitamento de toda a arquitetura de microsserviços. O roadmap de 5 marcos do desenvolvimento foi estruturado no `README.md` e consolidado na Issue de entrega `#1` no repositório novo.
 

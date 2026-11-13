@@ -52,6 +52,16 @@ export function createApp(c: Container) {
     }),
   );
 
+  // 1. Webhook oficial do Stripe: corpo CRU registrado ANTES do express.json()
+  app.use('/api/webhooks/stripe', express.raw({ type: '*/*' }), (req: any, _res, next) => {
+    if (Buffer.isBuffer(req.body)) {
+      req.rawBody = req.body.toString('utf8');
+    } else if (typeof req.body === 'string') {
+      req.rawBody = req.body;
+    }
+    next();
+  });
+
   app.use(
     express.json({
       limit: '256kb',

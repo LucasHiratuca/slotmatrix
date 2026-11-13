@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from 'express';
 import { ZodError } from 'zod';
 import {
+  BillingOperationError,
   ConflictError,
   DomainException,
   FeatureNotEntitledError,
@@ -17,6 +18,7 @@ import {
 } from '../../shared/domain/errors';
 
 export function statusFor(err: unknown): number {
+  if (err instanceof BillingOperationError) return err.status;
   if (err instanceof QuotaExceededError || err instanceof FeatureNotEntitledError) return 402;
   if (err instanceof UnsafeWebhookUrlError || err instanceof ValidationError) return 422;
   if (
@@ -39,6 +41,13 @@ export function domainExceptionFilter(err: unknown, _req: Request, res: Response
       error: 'BAD_REQUEST',
       message: 'Invalid request payload',
       issues: err.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+    });
+  }
+  if (err instanceof BillingOperationError) {
+    return res.status(err.status).json({
+      error: err.code,
+      message: err.message,
+      ...(err.referenceId ? { referenceId: err.referenceId } : {}),
     });
   }
   if (err instanceof DomainException) {

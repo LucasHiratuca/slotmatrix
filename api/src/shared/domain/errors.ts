@@ -43,3 +43,15 @@ export class ConflictError extends DomainException {
 export class LastOwnerRemovalError extends DomainException {
   readonly code = 'LAST_OWNER_REMOVAL';
 }
+export class BillingOperationError extends DomainException {
+  readonly code: string;
+  readonly status: number;
+  readonly referenceId?: string;
+
+  constructor(code: string, message: string, status: number = 400, referenceId?: string) {
+    super(message);
+    this.code = code;
+    this.status = status;
+    this.referenceId = referenceId;
+  }
+}

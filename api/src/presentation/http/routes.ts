@@ -8,7 +8,7 @@ import { BILLING_SIGNATURE_HEADER, signBillingPayload } from '../../billing/infr
 import { PLAN_CODES, PlanQuota } from '../../billing/domain/value-objects/PlanQuota';
 import { RESOURCE_CATEGORIES } from '../../catalog/domain/aggregates/BookableResource';
 import { ROLES } from '../../tenancy/domain/aggregates/Workspace';
-import { ForbiddenError, NotFoundError, QuotaExceededError, UnauthorizedError } from '../../shared/domain/errors';
+import { BillingOperationError, ForbiddenError, NotFoundError, QuotaExceededError, UnauthorizedError } from '../../shared/domain/errors';
 
 const registerBody = z.object({
   email: z.string().email(),
@@ -790,16 +790,55 @@ export function registerRoutes(kit: RouterKit, c: Container) {
       plan: z.enum(['PRO', 'ENTERPRISE']).default('PRO'),
     }),
     handler: async ({ tenant, body }) => {
+      // 1. RBAC já é verificado pelo RouterKit (minRole: 'ADMIN' -> OWNER e ADMIN permitidos; outros tomam 403)
+      const sub = await c.infra.subscriptions.findByTenant(tenant.tenantId);
+
+      // 2. Bloqueia se já for assinante ativo do mesmo plano
+      if (sub && sub.status === 'ACTIVE') {
+        if (sub.plan === body.plan) {
+          throw new BillingOperationError(
+            'BILLING_ALREADY_SUBSCRIBED',
+            `Sua clínica já possui uma assinatura ativa do Plano ${body.plan}.`,
+            409,
+          );
+        }
+      }
+
+      // 3. Se estiver com pendência PAST_DUE, direciona para o Portal
+      if (sub && sub.status === 'PAST_DUE') {
+        throw new BillingOperationError(
+          'BILLING_PAST_DUE',
+          'Sua assinatura possui pendência de pagamento. Regularize os dados de pagamento pelo Portal de autoatendimento antes de iniciar uma nova contratação.',
+          400,
+        );
+      }
+
       const ws = await c.infra.workspaces.findById(tenant.tenantId);
       const appBase = c.config.appPublicUrl || 'http://localhost:18174';
       const user = await c.infra.users.findById(tenant.userId);
 
+      // 4. Cria ou recupera o Customer da clínica no Stripe
+      const customerId = await c.stripeGateway.getOrCreateCustomer({
+        tenantId: tenant.tenantId,
+        workspaceName: ws?.name || 'SlotMatrix Workspace',
+        userEmail: user?.email,
+        existingCustomerId: sub?.externalCustomerId,
+      });
+
+      // Salva o customerId na assinatura se ainda não estiver salvo
+      if (sub && sub.externalCustomerId !== customerId) {
+        sub.activate(c.infra.clock.now(), { externalCustomerId: customerId });
+        await c.infra.subscriptions.save(sub);
+      }
+
+      // 5. Cria a sessão de Checkout no Stripe com preço resolvido por lookup_key
       const url = await c.stripeGateway.createCheckoutSession({
         tenantId: tenant.tenantId,
         workspaceName: ws?.name || 'SlotMatrix Workspace',
         userEmail: user?.email,
         plan: body.plan,
-        successUrl: `${appBase}?billing_success=true&plan=${body.plan}`,
+        customerId,
+        successUrl: `${appBase}?billing_success=true&session_id={CHECKOUT_SESSION_ID}&plan=${body.plan}`,
         cancelUrl: `${appBase}?billing_cancelled=true`,
       });
 
@@ -818,7 +857,11 @@ export function registerRoutes(kit: RouterKit, c: Container) {
       const sub = await c.infra.subscriptions.findByTenant(tenant.tenantId);
       const customerId = sub?.externalCustomerId;
       if (!customerId) {
-        throw new NotFoundError('Nenhum customer do Stripe vinculado a este Workspace. Realize um checkout primeiro.');
+        throw new BillingOperationError(
+          'BILLING_NO_CUSTOMER',
+          'Nenhum cliente do Stripe associado a esta clínica. Assine um plano primeiro para gerenciar o pagamento.',
+          400,
+        );
       }
       const appBase = c.config.appPublicUrl || 'http://localhost:18174';
       const url = await c.stripeGateway.createCustomerPortalSession({
@@ -833,7 +876,7 @@ export function registerRoutes(kit: RouterKit, c: Container) {
     method: 'post',
     path: '/webhooks/stripe',
     tag: 'Billing',
-    summary: 'Official Stripe Webhook with mandatory cryptographic signature and idempotency (4 key events)',
+    summary: 'Official Stripe Webhook with mandatory cryptographic signature and idempotency',
     access: 'public',
     handler: async ({ req, rawBody }) => {
       const stripeSig = req.header('stripe-signature');
@@ -844,15 +887,11 @@ export function registerRoutes(kit: RouterKit, c: Container) {
         throw new UnauthorizedError('Cabeçalho stripe-signature ausente');
       }
 
-      let eventPayload: any;
-      try {
-        eventPayload = c.stripeGateway.verifyWebhookSignature(rawBody, stripeSig);
-      } catch (err: any) {
-        throw new UnauthorizedError(`Assinatura de Webhook do Stripe inválida: ${err.message}`);
-      }
-
+      const eventPayload = c.stripeGateway.verifyWebhookSignature(rawBody, stripeSig);
       const command = c.acl.translate(eventPayload);
-      if (!command) return { status: 'ignored' };
+      if (!command) {
+        return { received: true, status: 'ignored' };
+      }
       const res = await c.billing.processWebhook.execute({ command, rawPayload: eventPayload });
       return { received: true, ...res };
     },
@@ -869,7 +908,7 @@ export function registerRoutes(kit: RouterKit, c: Container) {
       const sub = await c.infra.subscriptions.findByTenant(tenant.tenantId);
 
       let mrrCents = 0;
-      let activeCount = 0;
+      let activePaidCount = 0;
       const byPlan: Record<string, { total: number; active: number }> = {
         STARTER: { total: 0, active: 0 },
         PRO: { total: 0, active: 0 },
@@ -881,8 +920,9 @@ export function registerRoutes(kit: RouterKit, c: Container) {
         byPlan[sub.plan].total = 1;
         if (sub.status === 'ACTIVE' || sub.status === 'TRIALING') {
           byPlan[sub.plan].active = 1;
-          activeCount = 1;
-          if (sub.status === 'ACTIVE') {
+          // Starter é GRATUITO! Contar em activeSubscriptionsCount apenas planos PAGOS e ATIVOS
+          if (sub.status === 'ACTIVE' && sub.plan !== 'STARTER') {
+            activePaidCount = 1;
             if (sub.plan === 'PRO') mrrCents = 34900;
             if (sub.plan === 'ENTERPRISE') mrrCents = 89000;
           }
@@ -894,7 +934,7 @@ export function registerRoutes(kit: RouterKit, c: Container) {
       return {
         mrrCents,
         mrrFormatted: `R$ ${(mrrCents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
-        activeSubscriptionsCount: activeCount,
+        activeSubscriptionsCount: activePaidCount,
         distribution: byPlan,
         recentLogs,
       };

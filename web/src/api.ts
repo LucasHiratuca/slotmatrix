@@ -32,6 +32,7 @@ export interface WorkspaceOverview {
     status: string;
     trialEndsAt: string | null;
     currentPeriodEnd: string | null;
+    externalCustomerId?: string | null;
   } | null;
   entitlements: {
     planLabel: string;

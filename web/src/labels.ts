@@ -283,6 +283,30 @@ export function formatApiError(
   const rawMessage =
     typeof statusOrMessage === 'string' ? statusOrMessage : fallbackMessage;
 
+  if (code === 'BILLING_NOT_CONFIGURED' || status === 503) {
+    return 'O pagamento ainda não foi configurado nesta instalação. Fale com o administrador.';
+  }
+  if (code === 'BILLING_PRICE_NOT_FOUND') {
+    return 'Preço do plano não encontrado no Stripe. Execute npm run stripe:setup.';
+  }
+  if (code === 'BILLING_ALREADY_SUBSCRIBED') {
+    return 'Sua clínica já possui uma assinatura ativa deste plano.';
+  }
+  if (code === 'BILLING_NO_CUSTOMER') {
+    return 'Nenhum cliente do Stripe associado a esta clínica. Assine um plano primeiro para gerenciar o pagamento.';
+  }
+  if (code === 'BILLING_PORTAL_NOT_CONFIGURED') {
+    return 'O portal de autoatendimento ainda não foi ativado no painel de testes do Stripe. Ative-o em Configurações > Billing > Customer portal.';
+  }
+  if (code === 'BILLING_PAST_DUE') {
+    return 'Sua assinatura possui pendência de pagamento. Regularize os dados de pagamento pelo Portal de autoatendimento.';
+  }
+  if (code === 'BILLING_STRIPE_UNAVAILABLE' || status === 502) {
+    return 'O serviço de pagamento do Stripe está temporariamente indisponível. Tente novamente em instantes.';
+  }
+  if (/unexpected error|internal_error/i.test(rawMessage) || code === 'INTERNAL_ERROR') {
+    return 'Ocorreu uma instabilidade temporária no servidor. Tente novamente em instantes.';
+  }
   if (status === 402 || code === 'QUOTA_EXCEEDED' || /quota|402/i.test(rawMessage)) {
     return 'O limite do seu plano atual foi atingido. Faça upgrade para o Plano Pro para liberar mais recursos e funcionalidades.';
   }

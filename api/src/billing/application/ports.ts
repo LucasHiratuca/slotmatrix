@@ -4,12 +4,14 @@ export type BillingCommandBase = {
   externalEventId: string;
   tenantId: string;
   externalCustomerId?: string;
+  eventCreatedAt?: Date;
 };
 
 export type BillingCommand =
   | (BillingCommandBase & { type: 'ACTIVATE_PLAN'; plan?: PlanCode; periodEnd?: Date })
   | (BillingCommandBase & { type: 'MARK_PAST_DUE' })
-  | (BillingCommandBase & { type: 'CANCEL_SUBSCRIPTION' });
+  | (BillingCommandBase & { type: 'CANCEL_SUBSCRIPTION' })
+  | (BillingCommandBase & { type: 'CLEAR_PAST_DUE' });
 
 export interface IBillingWebhookAcl {
   verifySignature(rawBody: string, signature: string | undefined): boolean;

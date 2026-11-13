@@ -26,6 +26,7 @@ export function makeHarness(overrides: Partial<Parameters<typeof buildContainer>
     ...overrides,
     billingWebhookSecret: overrides.billingWebhookSecret ?? BILLING_SECRET,
     stripeWebhookSecret: overrides.stripeWebhookSecret ?? STRIPE_WEBHOOK_SECRET,
+    stripeSecretKey: overrides.stripeSecretKey !== undefined ? overrides.stripeSecretKey : 'sk_test_mock_slotmatrix',
     enableApiDocs: overrides.enableApiDocs ?? true,
   });
   return { infra, c, clock, notifications: infra.notifications, emails: infra.emails };
@@ -49,10 +50,10 @@ export function billingEvent(id: string, type: string, tenantId: string, extra: 
       },
     },
   });
-  return { body, signature: signBillingPayload(body, BILLING_SECRET) };
+  return { id, body };
 }
 
-export async function upgradeTenant(h: Harness, tenantId: string, plan: 'PRO' | 'ENTERPRISE' = 'PRO') {
+export async function upgradeTenant(h: Harness, tenantId: string, plan = 'PRO') {
   const ev = billingEvent(`evt_${Math.random().toString(36).slice(2, 8)}`, 'checkout.session.completed', tenantId, { plan });
   const cmd = h.c.acl.translate(JSON.parse(ev.body))!;
   await h.c.billing.processWebhook.execute({ command: cmd, rawPayload: ev });
