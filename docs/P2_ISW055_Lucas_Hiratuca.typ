@@ -253,6 +253,8 @@ O sistema conta com um conjunto completo de ferramentas de observabilidade e doc
 - *Suíte de Testes Automatizados (Vitest):* 16 suítes totalizando 103 testes automatizados (70 no backend e 33 no frontend), cobrindo a integridade dos agregados, controle RBAC, cálculo do MRR, bloqueio de quotas, tratamento idempotente dos 4 eventos de webhook da Stripe e a máquina de estados das reservas.
 - *Pipeline de CI/CD:* Não foi implementado pipeline automatizado em nuvem via GitHub Actions; a validação contínua e a prevenção de regressão foram asseguradas localmente pela execução automatizada da suíte Vitest pré-commits e pela verificação preventiva de liveness pelo Docker daemon.
 
+#evidencia([Documentação interativa OpenAPI 3.0 (Swagger) disponibilizada pela API em tema escuro], arquivo: "prints/api_swagger.png")
+
 == Camadas IaaS, PaaS e SaaS do projeto
 
 #table(
@@ -367,6 +369,7 @@ O sistema conta com um conjunto completo de ferramentas de observabilidade e doc
 
   #evidencia([Atividade 11 — evidência da entrega (terminal git log do commit 31567de)], arquivo: "prints/ativ11_evidencia.png")
   #evidencia([Atividade 11 — resultado (painel de faturamento com Stripe, dashboard de MRR e bloqueio 402)], arquivo: "prints/ativ11_resultado.png")
+  #evidencia([Atividade 11 — evidência complementar (liberação imediata da cota na API após recepção do webhook assinado)], arquivo: "prints/api_evidencia_limite_liberado.png")
 
   *Dificuldades e como foram resolvidas.* A garantia de idempotência para suportar reenvios de webhooks da Stripe sem gerar inconsistências financeiras ou duplicidade de eventos foi solucionada persistindo os IDs únicos de evento (`externalEventId`) no MariaDB antes da execução transacional dos agregados de subscrição.
 ]

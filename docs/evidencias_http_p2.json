@@ -1,0 +1,144 @@
+{
+  "capturedAt": "13/11/2026, 19:37:21",
+  "rbacEntries": [
+    {
+      "title": "1. RBAC — SPECIALIST tenta cadastrar recurso (exige ADMIN ou superior)",
+      "method": "POST",
+      "url": "/api/resources",
+      "headers": {
+        "Authorization": "Bearer eyJhbGciOiJIUzI1NiI…",
+        "x-workspace-id": "68d11abf-e9f7-45e6-8396-9aad3920cdeb",
+        "content-type": "application/json"
+      },
+      "body": "{\"name\":\"Sala Cirúrgica 04\",\"category\":\"ROOM\",\"capabilities\":[\"CABINE_ESTERIL\"]}",
+      "status": 403,
+      "statusText": "Forbidden",
+      "date": "Fri, 13 Nov 2026 22:37:21 GMT",
+      "resp": "{\n  \"error\": \"FORBIDDEN\",\n  \"message\": \"Requires role ADMIN or higher\"\n}"
+    },
+    {
+      "title": "2. Isolamento Multi-Tenant — Dono da Aura tenta ler recursos da VitaScan",
+      "method": "GET",
+      "url": "/api/resources",
+      "headers": {
+        "Authorization": "Bearer eyJhbGciOiJIUzI1NiI…",
+        "x-workspace-id": "68d11abf-e9f7-45e6-8396-9aad3920cdeb"
+      },
+      "status": 403,
+      "statusText": "Forbidden",
+      "date": "Fri, 13 Nov 2026 22:37:21 GMT",
+      "resp": "{\n  \"error\": \"TENANT_ACCESS_DENIED\",\n  \"message\": \"You do not have access to this workspace\"\n}"
+    },
+    {
+      "title": "3. Autenticação — Requisição sem Bearer token JWT",
+      "method": "GET",
+      "url": "/api/resources",
+      "headers": {
+        "x-workspace-id": "68d11abf-e9f7-45e6-8396-9aad3920cdeb"
+      },
+      "status": 401,
+      "statusText": "Unauthorized",
+      "date": "Fri, 13 Nov 2026 22:37:21 GMT",
+      "resp": "{\n  \"error\": \"UNAUTHORIZED\",\n  \"message\": \"Missing or invalid bearer token\"\n}"
+    }
+  ],
+  "webhookEntries": [
+    {
+      "title": "4. Limite do plano STARTER — 6º recurso na Aura (bloqueado em 5/5)",
+      "method": "POST",
+      "url": "/api/resources",
+      "headers": {
+        "Authorization": "Bearer eyJhbGciOiJIUzI1NiI…",
+        "x-workspace-id": "3639819d-c457-44ad-89c8-c7a3e1c56ca7",
+        "content-type": "application/json"
+      },
+      "body": "{\"name\":\"Cabine Extra 03\",\"category\":\"ROOM\",\"capabilities\":[\"CABINE_ESTERIL\"]}",
+      "status": 402,
+      "statusText": "Payment Required",
+      "date": "Fri, 13 Nov 2026 22:37:21 GMT",
+      "resp": "{\n  \"error\": \"QUOTA_EXCEEDED\",\n  \"message\": \"BookableResource quota reached for plan STARTER: 5/5\"\n}"
+    },
+    {
+      "title": "5. Webhook com assinatura criptográfica INVÁLIDA (rejeitado 401/403)",
+      "method": "POST",
+      "url": "/api/webhooks/billing",
+      "headers": {
+        "x-billing-signature": "sha256=00000000000000000…",
+        "content-type": "application/json"
+      },
+      "body": "{\"id\":\"evt_p2_1794609441221\",\"type\":\"checkout.session.completed\",\"data\":{\"object\":{\"customer\":\"cus_aura_p2\",\"metadata\":{\"workspace_id\":\"3639819d-c457-44ad-89c8-c7a3e1c56ca7\",\"plan\":\"PRO\"}}}}",
+      "status": 401,
+      "statusText": "Unauthorized",
+      "date": "Fri, 13 Nov 2026 22:37:21 GMT",
+      "resp": "{\n  \"error\": \"UNAUTHORIZED\",\n  \"message\": \"Invalid billing webhook signature\"\n}"
+    },
+    {
+      "title": "6. Webhook checkout.session.completed assinado (HMAC-SHA256) — Ativa PRO",
+      "method": "POST",
+      "url": "/api/webhooks/billing",
+      "headers": {
+        "x-billing-signature": "sha256=74c77b94a9f75073b…",
+        "content-type": "application/json"
+      },
+      "body": "{\"id\":\"evt_p2_1794609441221\",\"type\":\"checkout.session.completed\",\"data\":{\"object\":{\"customer\":\"cus_aura_p2\",\"metadata\":{\"workspace_id\":\"3639819d-c457-44ad-89c8-c7a3e1c56ca7\",\"plan\":\"PRO\"}}}}",
+      "status": 200,
+      "statusText": "OK",
+      "date": "Fri, 13 Nov 2026 22:37:21 GMT",
+      "resp": "{\n  \"status\": \"processed\"\n}"
+    },
+    {
+      "title": "7. MESMO evento reenviado (Idempotência transacional por external_event_id)",
+      "method": "POST",
+      "url": "/api/webhooks/billing",
+      "headers": {
+        "x-billing-signature": "sha256=74c77b94a9f75073b…",
+        "content-type": "application/json"
+      },
+      "body": "{\"id\":\"evt_p2_1794609441221\",\"type\":\"checkout.session.completed\",\"data\":{\"object\":{\"customer\":\"cus_aura_p2\",\"metadata\":{\"workspace_id\":\"3639819d-c457-44ad-89c8-c7a3e1c56ca7\",\"plan\":\"PRO\"}}}}",
+      "status": 200,
+      "statusText": "OK",
+      "date": "Fri, 13 Nov 2026 22:37:21 GMT",
+      "resp": "{\n  \"status\": \"duplicate\"\n}"
+    }
+  ],
+  "afterEntries": [
+    {
+      "title": "8. Consulta do Workspace Aura após o webhook (Confirmado Plano PRO)",
+      "method": "GET",
+      "url": "/api/workspace",
+      "headers": {
+        "Authorization": "Bearer eyJhbGciOiJIUzI1NiI…",
+        "x-workspace-id": "3639819d-c457-44ad-89c8-c7a3e1c56ca7"
+      },
+      "status": 200,
+      "statusText": "OK",
+      "date": "Fri, 13 Nov 2026 22:37:21 GMT",
+      "resp": "{\n  \"id\": \"3639819d-c457-44ad-89c8-c7a3e1c56ca7\",\n  \"name\": \"Estúdio Aura\",\n  \"slug\": \"estudio-aura\",\n  \"role\": \"OWNER\",\n  \"subscription\": {\n    \"plan\": \"PRO\",\n    \"status\": \"ACTIVE\",\n    \"trialEndsAt\": null,\n    \"currentPeriodEnd\": null,\n    \"externalCustomerId\": \"cus_aura_p2\"\n  },\n  \"entitlements\": {\n    \"subscriptionHealthy\": true,\n    \"maxActiveResources\": 40,\n    \"maxBookingsPerMonth\": null,\n    \"smartWaitlistEnabled\": true,\n    \"securityDepositEnabled\": true,\n    \"publicBookingPortalEnabled\": true,\n    \"vipWaitlistPriorityEnabled\": false,\n    \"exportableAuditLogs\": false,\n    \"planLabel\": \"PRO\"\n  },\n  \"quota\": {\n    \"resourcesUsed\": 5,\n    \"resourcesMax\": 40,\n    \"usagePercent\": 13\n  }\n}"
+    },
+    {
+      "title": "9. Mesmo 6º recurso, agora liberado com sucesso no plano PRO",
+      "method": "POST",
+      "url": "/api/resources",
+      "headers": {
+        "Authorization": "Bearer eyJhbGciOiJIUzI1NiI…",
+        "x-workspace-id": "3639819d-c457-44ad-89c8-c7a3e1c56ca7",
+        "content-type": "application/json"
+      },
+      "body": "{\"name\":\"Cabine Extra 03\",\"category\":\"ROOM\",\"capabilities\":[\"CABINE_ESTERIL\"]}",
+      "status": 201,
+      "statusText": "Created",
+      "date": "Fri, 13 Nov 2026 22:37:21 GMT",
+      "resp": "{\n  \"id\": \"79606c53-3d2c-41c0-a5fe-54f0923b33b7\",\n  \"name\": \"Cabine Extra 03\",\n  \"category\": \"ROOM\",\n  \"status\": \"ACTIVE\",\n  \"capabilities\": [\n    \"cabine_esteril\"\n  ],\n  \"weeklyWindows\": [\n    {\n      \"dayOfWeek\": 0,\n      \"startMinuteOfDay\": 420,\n      \"endMinuteOfDay\": 1260\n    },\n    {\n      \"dayOfWeek\": 1,\n      \"startMinuteOfDay\": 420,\n      \"endMinuteOfDay\": 1260\n    },\n    {\n      \"dayOfWeek\": 2,\n      \"startMinuteOfDay\": 420,\n      \"endMinuteOfDay\": 1260\n    },\n    {\n      \"dayOfWeek\": 3,\n      \"startMinuteOfDay\": 420,\n      \"endMinuteOfDay\": 1260\n    },\n    {\n      \"dayOfWeek\": 4,\n      \"startMinuteOfDay\": 420,\n      \"endMinuteOfDay\": 1260\n    },\n    {\n      \"dayOfWeek\": 5,\n      \"startMinuteOfDay\": 420,\n      \"endMinuteOfDay\": 1260\n    },\n    {\n      \"dayOfWeek\": 6,\n      \"startMinuteOfDay\": 420,\n      \"endMinuteOfDay\": 1260\n    }\n  ],\n  \"maintenanceBlocks\": [],\n  \"createdAt\": \"2026-11-13T22:30:31.853Z\"\n}"
+    },
+    {
+      "title": "10. Health check de liveness monitorado pelo Docker daemon",
+      "method": "GET",
+      "url": "/api/health",
+      "headers": {},
+      "status": 200,
+      "statusText": "OK",
+      "date": "Fri, 13 Nov 2026 22:37:21 GMT",
+      "resp": "{\n  \"status\": \"ok\",\n  \"service\": \"slotmatrix-api\"\n}"
+    }
+  ]
+}
