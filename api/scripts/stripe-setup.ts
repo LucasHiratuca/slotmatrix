@@ -1,10 +1,27 @@
 import Stripe from 'stripe';
-import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
 
-// Load .env from project root or current dir
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
-dotenv.config();
+// Load .env from project root or current dir without external dependencies
+function loadEnvFile(filePath: string) {
+  if (!fs.existsSync(filePath)) return;
+  const content = fs.readFileSync(filePath, 'utf-8');
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    const val = trimmed.slice(eqIdx + 1).trim();
+    if (!process.env[key]) {
+      process.env[key] = val;
+    }
+  }
+}
+
+loadEnvFile(path.resolve(__dirname, '../../.env'));
+loadEnvFile(path.resolve(process.cwd(), '.env'));
+loadEnvFile(path.resolve(process.cwd(), '../.env'));
 
 const secretKey = process.env.STRIPE_SECRET_KEY?.trim();
 
