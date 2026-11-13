@@ -249,7 +249,7 @@ A governança de segurança do SlotMatrix apoia-se em três pilares rigorosos:
 O sistema conta com um conjunto completo de ferramentas de observabilidade e documentação:
 - *Health Checks de Liveness:* Endpoint `GET /api/health` monitorado continuamente pelo Docker daemon a cada 10 segundos para reinicialização preventiva de containers degradados.
 - *Documentação Interativa OpenAPI 3.0 (Swagger):* Disponibilizada publicamente em `http://localhost:18081/api/docs`, detalhando schemas de entrada e saída com validação Zod.
-- *Suíte de Testes Automatizados (Vitest):* 7 suítes contendo 40 testes automatizados que validam a integridade dos agregados, controle RBAC, cálculo do MRR, bloqueio de quotas e tratamento idempotente dos 4 eventos de webhook da Stripe.
+- *Suíte de Testes Automatizados (Vitest):* 16 suítes totalizando 103 testes automatizados (70 no backend e 33 no frontend), cobrindo a integridade dos agregados, controle RBAC, cálculo do MRR, bloqueio de quotas, tratamento idempotente dos 4 eventos de webhook da Stripe e a máquina de estados das reservas.
 
 == Camadas IaaS, PaaS e SaaS do projeto
 
@@ -347,6 +347,7 @@ O sistema conta com um conjunto completo de ferramentas de observabilidade e doc
 
   #evidencia([Atividade 10 — evidência da entrega (terminal git log do commit 0cc74c6)], arquivo: "prints/ativ10_evidencia.png")
   #evidencia([Atividade 10 — resultado (painel operacional com grade multi-recurso e teste de RBAC 403)], arquivo: "prints/ativ10_resultado.png")
+  #evidencia([Hardening da interface clínica e máquina de estados do drawer (terminal git log do commit a8c0449)], arquivo: "prints/fix_drawer_evidencia.png")
 
   *Dificuldades e como foram resolvidas.* Implementar o bloqueio atômico simultâneo de três categorias distintas de recursos (Médico, Sala e Equipamento) sem provocar deadlocks exigiu ordenar deterministicamente as chaves de alocação antes da aquisição de locks nas transações SQL, o que gerou 1 dia de atraso para finalizar os testes de integração.
 ]
