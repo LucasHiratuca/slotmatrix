@@ -62,7 +62,7 @@ O faturamento é recorrente mensal (**SaaS B2B via Stripe Subscriptions**), base
 | Plano | Preço Mensal | Limites e Direitos do Plano | Público-Alvo e Motivo do Upgrade |
 | :--- | :---: | :--- | :--- |
 | **STARTER (Free)** | **R$ 0,00 / mês** | • Até **5 recursos alocáveis** ativos (`SPECIALIST`, `ROOM`, `EQUIPMENT`)<br>• Até 100 agendamentos/mês<br>• Limite estrito no backend (HTTP 402 se tentar criar o 6º recurso)<br>• *Smart Waitlist e Sinal Anti-No-Show DESATIVADOS* | Clínicas e consultórios individuais em fase de teste. |
-| **PRO** *(Principal)* | **R$ 349,00 / mês** | • Até **20 recursos alocáveis** ativos<br>• Agendamentos **ILIMITADOS**<br>• **Buffers assimétricos de esterilização** (`TurnaroundBuffer`)<br>• **Proteção Anti-No-Show** (cobrança de sinal e retenção de penalidade no Stripe)<br>• **Smart Waitlist Ativa** (oferta em cascata com expiração temporizada)<br>• **Portal Público de Autoagendamento** liberado | Clínicas de médio porte e centros diagnósticos. O plano se paga recuperando **uma única falta** evitada por mês. |
+| **PRO** *(Principal)* | **R$ 349,00 / mês** | • Até **40 recursos alocáveis** ativos<br>• Agendamentos **ILIMITADOS**<br>• **Buffers assimétricos de esterilização** (`TurnaroundBuffer`)<br>• **Proteção Anti-No-Show** (cobrança de sinal e retenção de penalidade no Stripe)<br>• **Smart Waitlist Ativa** (oferta em cascata com expiração temporizada)<br>• **Portal Público de Autoagendamento** liberado | Clínicas de médio porte e centros diagnósticos. O plano se paga recuperando **uma única falta** evitada por mês. |
 | **ENTERPRISE** | **R$ 890,00 / mês** | • Recursos e agendamentos **ILIMITADOS**<br>• Multi-unidades / Multi-workspace<br>• **Fila de Espera com Prioridade VIP**<br>• Exportação de **AuditLog Imutável** para auditorias ISO e vigilância sanitária<br>• Suporte prioritário com SLA | Redes de policlínicas e hospitais-dia com alta exigência de conformidade e auditoria. |
 
 ### Ciclo de Vida da Assinatura e Webhooks (4 Eventos Fundamentais)
@@ -142,7 +142,7 @@ Ao inicializar o sistema (ou rodar `npm run seed`), o banco é provisionado com 
 | **VitaScan Diagnósticos** | `PRO` (`ACTIVE`) | `admin@vitascan.test` | `Passw0rd!` | `ADMIN` | Gestão de equipe, catálogo de procedimentos e auditoria. |
 | **VitaScan Diagnósticos** | `PRO` (`ACTIVE`) | `coord@vitascan.test` | `Passw0rd!` | `COORDINATOR` | Operação diária: confirmação, check-in, no-show e cancelamentos. |
 | **VitaScan Diagnósticos** | `PRO` (`ACTIVE`) | `spec@vitascan.test` | `Passw0rd!` | `SPECIALIST` | Visão da grade clínica (bloqueado com HTTP 403 ao tentar criar recursos ou alterar planos). |
-| **Estúdio Aura** (`estudio-aura`) | `STARTER` (`TRIALING`) | `owner@aura.test` | `Passw0rd!` | `OWNER` | Cravado no **limite exato de 5/5 recursos ativos**. Tentar criar o 6º recurso dispara imediatamente `HTTP 402 QuotaExceededError`. Ao assinar o plano Pro no Stripe, o limite é ampliado para 20 recursos e a criação do 6º recurso passa a ser aceita! |
+| **Estúdio Aura** (`estudio-aura`) | `STARTER` (`TRIALING`) | `owner@aura.test` | `Passw0rd!` | `OWNER` | Cravado no **limite exato de 5/5 recursos ativos**. Tentar criar o 6º recurso dispara imediatamente `HTTP 402 QuotaExceededError`. Ao assinar o plano Pro no Stripe, o limite é ampliado para 40 recursos e a criação do 6º recurso passa a ser aceita! |
 
 ---
 

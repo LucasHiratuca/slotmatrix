@@ -1,20 +1,30 @@
 import React, { useEffect, useState } from 'react';
-import { AdminMetricsDto, ApiHttpError, apiRequest, WorkspaceOverview } from './api';
+import {
+  AdminMetricsDto,
+  ApiHttpError,
+  apiRequest,
+  resolveWorkspaceQuota,
+  WorkspaceOverview,
+} from './api';
 import {
   AlertCircle,
-  ArrowRight,
   Check,
+  CheckCircle2,
   CreditCard,
-  DollarSign,
   ExternalLink,
   RefreshCw,
   ShieldCheck,
   Sparkles,
-  Terminal,
   TrendingUp,
-  Users,
-  Zap,
 } from 'lucide-react';
+import {
+  formatApiError,
+  formatAuditAction,
+  formatCurrencyBRL,
+  formatDateTimeBR,
+  formatPlanName,
+  formatSubscriptionStatus,
+} from './labels';
 
 interface Props {
   token: string;
@@ -23,31 +33,43 @@ interface Props {
   onRefresh: () => Promise<void>;
 }
 
-export const BillingView: React.FC<Props> = ({ token, workspaceId, overview, onRefresh }) => {
-  const [customEventId, setCustomEventId] = useState('evt_stripe_sim_' + Math.floor(Math.random() * 90000 + 10000));
+export const BillingView: React.FC<Props> = ({
+  token,
+  workspaceId,
+  overview,
+  onRefresh,
+}) => {
   const [selectedPlan, setSelectedPlan] = useState<'STARTER' | 'PRO' | 'ENTERPRISE'>('PRO');
-  const [webhookLog, setWebhookLog] = useState<string | null>(null);
+  const [simulationNotice, setSimulationNotice] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'info' | 'error'; message: string } | null>(null);
+  const [feedback, setFeedback] = useState<{
+    type: 'success' | 'info' | 'error';
+    message: string;
+  } | null>(null);
   const [metrics, setMetrics] = useState<AdminMetricsDto | null>(null);
   const [loadingMetrics, setLoadingMetrics] = useState(false);
 
-  // Parse URL query params for Stripe redirect feedback
+  const quota = resolveWorkspaceQuota(overview);
+  const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true';
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('billing_success') === 'true') {
       const plan = params.get('plan') || 'PRO';
       setFeedback({
         type: 'success',
-        message: `Sessão de Checkout do Stripe concluída! O webhook do Stripe processa a assinatura recorrente (${plan}) e atualiza o seu plano no banco de dados.`,
+        message: `Assinatura concluída com sucesso! Seu plano foi atualizado para ${formatPlanName(plan)}.`,
       });
       void onRefresh();
     } else if (params.get('billing_cancelled') === 'true') {
       setFeedback({
         type: 'info',
-        message: 'Checkout do Stripe cancelado pelo usuário. Seu plano atual foi mantido inalterado.',
+        message: 'Alteração de assinatura cancelada. Seu plano atual foi mantido.',
       });
     }
   }, []);
@@ -60,8 +82,8 @@ export const BillingView: React.FC<Props> = ({ token, workspaceId, overview, onR
         workspaceId,
       });
       setMetrics(data);
-    } catch (err) {
-      console.error('Falha ao carregar métricas:', err);
+    } catch {
+      // ignore if user role doesn't have admin metrics
     } finally {
       setLoadingMetrics(false);
     }
@@ -87,8 +109,11 @@ export const BillingView: React.FC<Props> = ({ token, workspaceId, overview, onR
         window.location.href = res.checkoutUrl;
       }
     } catch (err) {
-      const msg = err instanceof ApiHttpError ? `[${err.code}] ${err.message}` : String(err);
-      setFeedback({ type: 'error', message: `Erro ao iniciar checkout: ${msg}` });
+      const msg =
+        err instanceof ApiHttpError
+          ? formatApiError(err.message, err.code)
+          : formatApiError(String(err));
+      setFeedback({ type: 'error', message: `Não foi possível iniciar a assinatura: ${msg}` });
       setCheckoutLoading(null);
     }
   };
@@ -106,20 +131,28 @@ export const BillingView: React.FC<Props> = ({ token, workspaceId, overview, onR
         window.location.href = res.portalUrl;
       }
     } catch (err) {
-      const msg = err instanceof ApiHttpError ? `[${err.code}] ${err.message}` : String(err);
+      const msg =
+        err instanceof ApiHttpError
+          ? formatApiError(err.message, err.code)
+          : formatApiError(String(err));
       setFeedback({
         type: 'error',
-        message: `Portal do Cliente: ${msg}. (Dica: complete um checkout primeiro para vincular um ID de cliente Stripe).`,
+        message: `Portal de assinatura: ${msg}`,
       });
     } finally {
       setPortalLoading(false);
     }
   };
 
-  const triggerSignedWebhook = async (event: 'upgrade' | 'payment_failed' | 'cancel', plan?: 'STARTER' | 'PRO' | 'ENTERPRISE') => {
+  const triggerSubscriptionSimulation = async (
+    event: 'upgrade' | 'payment_failed' | 'cancel',
+    plan?: 'STARTER' | 'PRO' | 'ENTERPRISE',
+  ) => {
     setLoading(true);
+    setSimulationNotice(null);
     try {
-      const res = await apiRequest<{
+      const targetPlan = plan ?? selectedPlan;
+      await apiRequest<{
         eventId: string;
         webhookHttpStatus: number;
         result: { status: 'processed' | 'duplicate' };
@@ -129,18 +162,29 @@ export const BillingView: React.FC<Props> = ({ token, workspaceId, overview, onR
         workspaceId,
         body: {
           event,
-          plan: plan ?? selectedPlan,
-          eventId: customEventId.trim() || undefined,
+          plan: targetPlan,
         },
       });
-      setWebhookLog(JSON.stringify(res, null, 2));
+      const summaryByEvent: Record<typeof event, string> = {
+        upgrade: `Assinatura atualizada com sucesso para ${formatPlanName(targetPlan)}. Os novos limites já estão ativos.`,
+        payment_failed:
+          'Pendência financeira simulada. A assinatura entrou em estado de pagamento pendente.',
+        cancel: 'Cancelamento simulado. A assinatura foi marcada como cancelada.',
+      };
+      setSimulationNotice({
+        type: 'success',
+        text: summaryByEvent[event],
+      });
       await onRefresh();
       if (overview?.role === 'OWNER' || overview?.role === 'ADMIN') {
         void loadAdminMetrics();
       }
     } catch (err) {
-      const msg = err instanceof ApiHttpError ? `[HTTP ${err.status} ${err.code}] ${err.message}` : String(err);
-      setWebhookLog(msg);
+      const msg =
+        err instanceof ApiHttpError
+          ? formatApiError(err.message, err.code)
+          : formatApiError(String(err));
+      setSimulationNotice({ type: 'error', text: msg });
     } finally {
       setLoading(false);
     }
@@ -149,43 +193,40 @@ export const BillingView: React.FC<Props> = ({ token, workspaceId, overview, onR
   const plans = [
     {
       code: 'STARTER' as const,
-      title: 'STARTER (Free Trial)',
-      price: 'R$ 0 / Grátis',
-      billingPeriod: '14 dias de teste ou uso individual',
+      title: 'Plano Starter',
+      price: 'R$ 0 / período de teste',
+      billingPeriod: '14 dias de avaliação para clínicas iniciais',
       features: [
-        'Até 5 BookableResources ativos (limite estrito HTTP 402)',
-        'Até 100 agendamentos/mês',
-        'Smart Waitlist: Desabilitada',
-        'Sinal de Confirmação Anti-No-Show: Desabilitado',
-        'Portal Público (/book/:slug): Desabilitado',
+        'Até 5 recursos ativos (especialistas, salas e equipamentos)',
+        'Até 100 agendamentos por mês',
+        'Agenda visual de alocação simultânea',
       ],
       isPopular: false,
     },
     {
       code: 'PRO' as const,
-      title: 'PRO (Operação Clínica & Médica)',
+      title: 'Plano Pro',
       price: 'R$ 349/mês',
-      billingPeriod: 'Cobrança recorrente mensal via Stripe',
+      billingPeriod: 'Cobrança recorrente mensal',
       features: [
-        'Até 20 BookableResources ativos',
-        'Agendamentos mensais ilimitados',
-        'Smart Waitlist com SlotOffer expirável automática',
-        'Depósitos Anti-No-Show & Política de cancelamento',
-        'Portal Público de Autoagendamento liberado',
+        'Até 40 recursos ativos na clínica',
+        'Agendamentos ilimitados no mês',
+        'Lista de espera com oferta automática de horários vagos',
+        'Sinal de reserva configurável por procedimento',
+        'Portal de agendamento online para pacientes',
       ],
       isPopular: true,
     },
     {
       code: 'ENTERPRISE' as const,
-      title: 'ENTERPRISE (Hospitais & Redes)',
+      title: 'Plano Enterprise',
       price: 'R$ 890/mês',
-      billingPeriod: 'Cobrança recorrente mensal via Stripe',
+      billingPeriod: 'Multi-unidade e operação hospitalar',
       features: [
-        'BookableResources ativos ilimitados',
-        'Agendamentos e salas ilimitadas',
-        'Fila de Espera com Prioridade VIP',
-        'Exportação de Auditoria Imutável (Audit Trail)',
-        'Suporte prioritário e SLA de alta disponibilidade',
+        'Recursos ativos ilimitados',
+        'Prioridade clínica e executiva na lista de espera',
+        'Registro de auditoria completo para conformidade',
+        'Atendimento prioritário e suporte dedicado',
       ],
       isPopular: false,
     },
@@ -193,94 +234,134 @@ export const BillingView: React.FC<Props> = ({ token, workspaceId, overview, onR
 
   return (
     <div className="space-y-6">
-      {/* Banner de Feedback do Stripe */}
+      <div>
+        <h1 className="text-lg font-semibold text-ink-primary">Plano e cobrança</h1>
+        <p className="text-xs text-ink-secondary mt-0.5">
+          Acompanhe o uso de recursos contratados, altere seu plano ou gerencie sua assinatura.
+        </p>
+      </div>
+
+      {/* Feedback Banner */}
       {feedback && (
         <div
-          className={`p-4 rounded-xl border flex items-start gap-3 ${
+          className={`p-4 rounded-xl border flex items-center justify-between gap-3 ${
             feedback.type === 'success'
-              ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200'
+              ? 'bg-[var(--status-confirmed-bg)] border-[var(--status-confirmed-border)] text-[var(--status-confirmed-text)]'
               : feedback.type === 'error'
-              ? 'bg-rose-950/40 border-rose-500/40 text-rose-200'
-              : 'bg-indigo-950/40 border-indigo-500/40 text-indigo-200'
+              ? 'bg-[var(--status-noshow-bg)] border-[var(--status-noshow-border)] text-[var(--status-noshow-text)]'
+              : 'bg-[var(--brand-subtle)] border-brand/30 text-brand'
           }`}
         >
-          {feedback.type === 'success' ? (
-            <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-          ) : feedback.type === 'error' ? (
-            <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-          ) : (
-            <Zap className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
-          )}
-          <div className="flex-1 text-xs">{feedback.message}</div>
+          <div className="flex items-center gap-2.5 text-xs">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{feedback.message}</span>
+          </div>
           <button
+            type="button"
             onClick={() => setFeedback(null)}
-            className="text-xs opacity-70 hover:opacity-100 font-bold px-2 py-0.5"
+            className="text-xs underline opacity-75 hover:opacity-100"
           >
-            ✕
+            Fechar
           </button>
         </div>
       )}
 
-      {/* Admin SaaS Dashboard */}
+      {/* Resumo de uso atual */}
+      <div className="bg-surface border border-border-subtle rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+        <div>
+          <div className="text-xs text-ink-secondary">Assinatura ativa da clínica</div>
+          <div className="flex items-center gap-2.5 mt-1">
+            <span className="text-base font-bold text-ink-primary">
+              {formatPlanName(quota.plan)}
+            </span>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[var(--status-confirmed-bg)] text-[var(--status-confirmed-text)] border border-[var(--status-confirmed-border)]">
+              {formatSubscriptionStatus(quota.status)}
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <div className="text-xs text-ink-secondary">Capacidade de recursos</div>
+            <div className="text-sm font-semibold text-ink-primary tabular-nums mt-0.5">
+              {quota.maxActiveResources !== null
+                ? `Recursos: ${quota.activeResources} de ${quota.maxActiveResources}`
+                : `Recursos: ${quota.activeResources} ativos (ilimitado)`}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Painel de Indicadores Financeiros (visível para Proprietário/Administrador) */}
       {(overview?.role === 'OWNER' || overview?.role === 'ADMIN') && (
-        <div className="bg-slate-900 border border-indigo-500/30 rounded-xl p-5 space-y-4">
+        <div className="bg-surface border border-border-subtle rounded-xl p-5 space-y-4 shadow-xs">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-indigo-400" />
-              <div>
-                <h3 className="text-sm font-bold text-white">SaaS Admin Dashboard · Métricas de Receita e Assinaturas</h3>
-                <p className="text-xs text-slate-400">
-                  Cálculo em tempo real do faturamento mensal recorrente (MRR) e status dos clientes
-                </p>
-              </div>
+            <div>
+              <h2 className="text-sm font-semibold text-ink-primary flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-[var(--status-confirmed-text)]" />
+                Indicadores de receita recorrente e assinaturas
+              </h2>
+              <p className="text-xs text-ink-secondary mt-0.5">
+                Visão consolidada das assinaturas ativas e distribuição por plano.
+              </p>
             </div>
             <button
+              type="button"
               onClick={loadAdminMetrics}
               disabled={loadingMetrics}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-1.5"
+              className="p-2 rounded-lg bg-canvas hover:bg-sunken text-ink-secondary hover:text-ink-primary border border-border-subtle text-xs flex items-center gap-1.5 transition"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loadingMetrics ? 'animate-spin' : ''}`} />
-              Atualizar Métricas
+              Atualizar indicadores
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-4">
-              <div className="text-xs text-slate-400 font-medium flex items-center justify-between">
-                <span>MRR Estimado (Stripe Test)</span>
-                <DollarSign className="w-4 h-4 text-emerald-400" />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-canvas border border-border-subtle rounded-lg p-4">
+              <div className="text-xs text-ink-secondary font-medium">
+                Receita recorrente mensal
               </div>
-              <div className="text-2xl font-black text-emerald-400 mt-1">
-                {metrics ? metrics.mrrFormatted : 'R$ 0,00'}
+              <div className="text-2xl font-bold text-[var(--status-confirmed-text)] mt-1 tabular-nums">
+                {metrics ? formatCurrencyBRL(metrics.mrrCents) : 'R$ 0,00'}
               </div>
-              <div className="text-[11px] text-slate-500 mt-1">Baseado em assinaturas ativas Pro (R$ 349) e Enterprise (R$ 890)</div>
+              <div className="text-xs text-ink-secondary mt-1">
+                Soma das assinaturas ativas no momento
+              </div>
             </div>
 
-            <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-4">
-              <div className="text-xs text-slate-400 font-medium flex items-center justify-between">
-                <span>Assinaturas Ativas</span>
-                <Users className="w-4 h-4 text-indigo-400" />
+            <div className="bg-canvas border border-border-subtle rounded-lg p-4">
+              <div className="text-xs text-ink-secondary font-medium">
+                Assinaturas pagas ativas
               </div>
-              <div className="text-2xl font-black text-white mt-1">
-                {metrics ? metrics.activeSubscriptionsCount : 0}
+              <div className="text-2xl font-bold text-ink-primary mt-1 tabular-nums">
+                {metrics?.activeSubscriptionsCount ?? 0}
               </div>
-              <div className="text-[11px] text-slate-500 mt-1">Contas em dia no Stripe ou período de trial operacional</div>
+              <div className="text-xs text-ink-secondary mt-1">
+                Clínicas em operação regular
+              </div>
             </div>
 
-            <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-4">
-              <div className="text-xs text-slate-400 font-medium">Distribuição por Plano</div>
-              <div className="space-y-1 mt-2 text-xs">
-                <div className="flex justify-between text-slate-300">
-                  <span>Starter / Free:</span>
-                  <span className="font-mono font-bold">{metrics?.distribution.STARTER?.total ?? 0}</span>
+            <div className="bg-canvas border border-border-subtle rounded-lg p-4">
+              <div className="text-xs text-ink-secondary font-medium">
+                Distribuição por plano
+              </div>
+              <div className="space-y-1 mt-2 text-xs tabular-nums">
+                <div className="flex justify-between text-ink-secondary">
+                  <span>Plano Starter:</span>
+                  <span className="font-semibold text-ink-primary">
+                    {metrics?.distribution.STARTER?.total ?? 0}
+                  </span>
                 </div>
-                <div className="flex justify-between text-indigo-300">
-                  <span>Pro (R$ 349):</span>
-                  <span className="font-mono font-bold">{metrics?.distribution.PRO?.active ?? 0}</span>
+                <div className="flex justify-between text-brand">
+                  <span>Plano Pro (R$ 349,00):</span>
+                  <span className="font-semibold">
+                    {metrics?.distribution.PRO?.active ?? 0}
+                  </span>
                 </div>
-                <div className="flex justify-between text-purple-300">
-                  <span>Enterprise (R$ 890):</span>
-                  <span className="font-mono font-bold">{metrics?.distribution.ENTERPRISE?.active ?? 0}</span>
+                <div className="flex justify-between text-[var(--res-equipment-text)]">
+                  <span>Plano Enterprise (R$ 890,00):</span>
+                  <span className="font-semibold">
+                    {metrics?.distribution.ENTERPRISE?.active ?? 0}
+                  </span>
                 </div>
               </div>
             </div>
@@ -288,64 +369,69 @@ export const BillingView: React.FC<Props> = ({ token, workspaceId, overview, onR
         </div>
       )}
 
-      {/* Barra de Acesso ao Portal do Cliente Stripe */}
-      <div className="bg-gradient-to-r from-indigo-950/40 via-slate-900 to-slate-900 border border-indigo-500/20 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+      {/* Barra de Acesso ao Portal de Autoatendimento */}
+      <div className="bg-surface border border-border-subtle rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
         <div className="flex items-center gap-3">
-          <CreditCard className="w-6 h-6 text-indigo-400 shrink-0" />
+          <CreditCard className="w-5 h-5 text-brand shrink-0" />
           <div>
-            <div className="text-sm font-semibold text-white">Portal do Cliente Stripe (Self-Service)</div>
-            <div className="text-xs text-slate-400">
-              Cancele, altere seu plano ou atualize a forma de pagamento de forma autônoma sem passar pelo suporte.
+            <div className="text-sm font-semibold text-ink-primary">
+              Portal de autoatendimento da assinatura
+            </div>
+            <div className="text-xs text-ink-secondary">
+              Altere a forma de pagamento, consulte faturas ou cancele sua assinatura quando desejar.
             </div>
           </div>
         </div>
         <button
+          type="button"
           onClick={handleOpenBillingPortal}
           disabled={portalLoading}
-          className="w-full sm:w-auto px-4 py-2 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-indigo-500/30 flex items-center justify-center gap-2 transition"
+          className="w-full sm:w-auto px-4 py-2 rounded-lg text-xs font-semibold bg-canvas hover:bg-sunken text-brand border border-brand/30 flex items-center justify-center gap-2 transition"
         >
           <ExternalLink className="w-3.5 h-3.5" />
-          {portalLoading ? 'Abrindo Portal...' : 'Gerenciar Assinatura no Stripe'}
+          {portalLoading ? 'Abrindo portal...' : 'Gerenciar forma de pagamento'}
         </button>
       </div>
 
-      {/* Plan Cards com Integração Stripe Checkout */}
+      {/* Cartões de Planos */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {plans.map((p) => {
-          const isCurrent = overview?.subscription.plan === p.code;
+          const isCurrent = quota.plan === p.code;
           return (
             <div
               key={p.code}
-              className={`rounded-xl border p-5 flex flex-col justify-between relative ${
+              className={`rounded-xl border p-5 flex flex-col justify-between relative shadow-xs ${
                 isCurrent
-                  ? 'bg-indigo-950/40 border-indigo-500 shadow-xl shadow-indigo-950/50 ring-1 ring-indigo-500/50'
+                  ? 'bg-[var(--brand-subtle)] border-brand ring-1 ring-brand/40'
                   : p.isPopular
-                  ? 'bg-slate-900 border-indigo-500/40 shadow-md'
-                  : 'bg-slate-900 border-slate-800'
+                  ? 'bg-surface border-brand/40'
+                  : 'bg-surface border-border-subtle'
               }`}
             >
               {p.isPopular && !isCurrent && (
-                <div className="absolute -top-3 right-4 px-2.5 py-0.5 rounded-full bg-indigo-500 text-white text-[10px] font-bold tracking-wide flex items-center gap-1 shadow">
-                  <Sparkles className="w-3 h-3" /> MAIS ESCOLHIDO
+                <div className="absolute -top-3 right-4 px-2.5 py-0.5 rounded-full bg-[var(--btn-primary-bg)] text-white text-xs font-semibold flex items-center gap-1 shadow-xs">
+                  <Sparkles className="w-3 h-3" /> Recomendado
                 </div>
               )}
 
               <div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-white">{p.title}</span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-bold text-ink-primary">{p.title}</span>
                   {isCurrent && (
-                    <span className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-emerald-500 text-slate-950">
-                      PLANO ATIVO ({overview?.subscription.status})
+                    <span className="px-2 py-0.5 text-xs font-semibold rounded bg-[var(--status-confirmed-bg)] text-[var(--status-confirmed-text)] border border-[var(--status-confirmed-border)]">
+                      Plano atual ({formatSubscriptionStatus(quota.status)})
                     </span>
                   )}
                 </div>
-                <div className="text-2xl font-black text-white mt-2">{p.price}</div>
-                <div className="text-[11px] text-slate-400">{p.billingPeriod}</div>
+                <div className="text-2xl font-bold text-ink-primary mt-2 tabular-nums">
+                  {p.price}
+                </div>
+                <div className="text-xs text-ink-secondary">{p.billingPeriod}</div>
 
-                <ul className="mt-4 space-y-2 text-xs text-slate-300">
+                <ul className="mt-4 space-y-2 text-xs text-ink-secondary">
                   {p.features.map((f) => (
                     <li key={f} className="flex items-start gap-2">
-                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                      <Check className="w-3.5 h-3.5 text-[var(--status-confirmed-text)] shrink-0 mt-0.5" />
                       <span>{f}</span>
                     </li>
                   ))}
@@ -354,25 +440,33 @@ export const BillingView: React.FC<Props> = ({ token, workspaceId, overview, onR
 
               <div className="mt-6 space-y-2">
                 {p.code === 'STARTER' ? (
-                  <div className="w-full py-2.5 rounded-lg text-xs font-semibold text-center bg-slate-800/80 text-slate-400 border border-slate-700/50">
-                    {isCurrent ? 'Plano Free Ativo' : 'Plano Gratuito / Básico'}
+                  <div className="w-full py-2.5 rounded-lg text-xs font-semibold text-center bg-sunken text-ink-secondary border border-border-subtle">
+                    {isCurrent ? 'Plano atual ativo' : 'Plano inicial de avaliação'}
                   </div>
                 ) : (
                   <button
+                    type="button"
                     disabled={checkoutLoading !== null}
                     onClick={() => void handleStripeCheckout(p.code)}
-                    className={`w-full py-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg ${
-                      p.code === 'PRO'
-                        ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-900/40'
-                        : 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-900/40'
-                    }`}
+                    className="w-full py-2.5 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-2 bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] text-white shadow-xs"
                   >
                     <CreditCard className="w-3.5 h-3.5" />
                     {checkoutLoading === p.code
-                      ? 'Iniciando Checkout Stripe...'
+                      ? 'Redirecionando...'
                       : isCurrent
-                      ? `Renovar ${p.title} (Stripe)`
-                      : `Assinar ${p.title} com Stripe`}
+                      ? `Renovar ${p.title}`
+                      : `Assinar ${p.title}`}
+                  </button>
+                )}
+
+                {isDemoMode && (
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => void triggerSubscriptionSimulation('upgrade', p.code)}
+                    className="w-full py-1.5 rounded-lg text-xs font-medium bg-canvas hover:bg-sunken text-ink-secondary hover:text-ink-primary border border-border-subtle transition"
+                  >
+                    Ativar {p.title} imediatamente (ambiente de demonstração)
                   </button>
                 )}
               </div>
@@ -381,68 +475,104 @@ export const BillingView: React.FC<Props> = ({ token, workspaceId, overview, onR
         })}
       </div>
 
-      {/* Painel de Auditoria e Testes de Webhook */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
-        <div className="flex items-center gap-2">
-          <Terminal className="w-5 h-5 text-emerald-400" />
-          <h3 className="text-sm font-semibold text-white">
-            Simulador de Webhooks Stripe & Garantia de Idempotência
-          </h3>
+      {/* Simulação de Eventos de Assinatura (apenas quando VITE_DEMO_MODE=true) */}
+      {isDemoMode && (
+        <div className="bg-surface border border-border-subtle rounded-xl p-5 space-y-4 shadow-xs">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-ink-primary flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-brand" />
+              Simulação de situação financeira da assinatura
+            </h2>
+            <p className="text-xs text-ink-secondary mt-1">
+              Simule alterações de plano, atrasos no pagamento ou cancelamento para verificar o bloqueio imediato de criação de novos recursos acima do limite.
+            </p>
+          </div>
         </div>
-        <p className="text-xs text-slate-400">
-          O Stripe envia webhooks de forma assíncrona. Teste a idempotência e os 4 estados principais da máquina de estados:
-          <span className="font-mono text-indigo-300"> checkout.session.completed</span>,
-          <span className="font-mono text-amber-300"> invoice.payment_failed</span>,
-          <span className="font-mono text-rose-300"> customer.subscription.deleted</span> e
-          <span className="font-mono text-cyan-300"> customer.subscription.updated</span>.
-        </p>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">externalEventId (Chave Idempotente)</label>
-            <input
-              type="text"
-              value={customEventId}
-              onChange={(e) => setCustomEventId(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-white"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">Plano Alvo</label>
+            <label className="block text-xs text-ink-secondary mb-1">
+              Plano de destino para ativação
+            </label>
             <select
               value={selectedPlan}
               onChange={(e) => setSelectedPlan(e.target.value as any)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+              className="w-full bg-canvas border border-border-subtle rounded-lg px-3 py-2 text-xs text-ink-primary"
             >
-              <option value="STARTER">STARTER</option>
-              <option value="PRO">PRO</option>
-              <option value="ENTERPRISE">ENTERPRISE</option>
+              <option value="STARTER">Plano Starter (limite de 5 recursos)</option>
+              <option value="PRO">Plano Pro (limite de 40 recursos)</option>
+              <option value="ENTERPRISE">Plano Enterprise (recursos ilimitados)</option>
             </select>
           </div>
+
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => void triggerSubscriptionSimulation('upgrade')}
+            className="px-4 py-2 rounded-lg text-xs font-semibold bg-[var(--status-confirmed-border)] hover:opacity-90 text-white transition"
+          >
+            Confirmar pagamento e ativar plano
+          </button>
+
           <div className="flex gap-2">
             <button
+              type="button"
               disabled={loading}
-              onClick={() => void triggerSignedWebhook('upgrade', selectedPlan)}
-              className="flex-1 py-2 px-3 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white"
+              onClick={() => void triggerSubscriptionSimulation('payment_failed')}
+              className="flex-1 px-3 py-2 rounded-lg text-xs font-semibold bg-canvas hover:bg-sunken text-[var(--status-pending-text)] border border-[var(--status-pending-border)] transition"
             >
-              Simular checkout.session.completed
+              Simular pagamento pendente
             </button>
             <button
+              type="button"
               disabled={loading}
-              onClick={() => void triggerSignedWebhook('payment_failed')}
-              className="py-2 px-3 rounded-lg text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white"
+              onClick={() => void triggerSubscriptionSimulation('cancel')}
+              className="flex-1 px-3 py-2 rounded-lg text-xs font-semibold bg-canvas hover:bg-[var(--status-noshow-bg)] text-[var(--status-noshow-text)] border border-[var(--status-noshow-border)] transition"
             >
-              Simular Inadimplência (PAST_DUE)
+              Simular cancelamento
             </button>
           </div>
         </div>
 
-        {webhookLog && (
-          <pre className="bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-emerald-300 overflow-x-auto">
-            {webhookLog}
-          </pre>
+        {simulationNotice && (
+          <div
+            className={`p-3.5 rounded-lg border text-xs flex items-center gap-2 ${
+              simulationNotice.type === 'success'
+                ? 'bg-[var(--status-confirmed-bg)] border-[var(--status-confirmed-border)] text-[var(--status-confirmed-text)]'
+                : 'bg-[var(--status-noshow-bg)] border-[var(--status-noshow-border)] text-[var(--status-noshow-text)]'
+            }`}
+          >
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>{simulationNotice.text}</span>
+          </div>
         )}
-      </div>
+        </div>
+      )}
+
+      {/* Últimos eventos financeiros na auditoria */}
+      {metrics && metrics.recentLogs && metrics.recentLogs.length > 0 && (
+        <div className="bg-surface border border-border-subtle rounded-xl p-5 space-y-3 shadow-xs">
+          <h3 className="text-xs font-semibold text-ink-primary">
+            Histórico recente de alterações de assinatura
+          </h3>
+          <div className="divide-y divide-border-subtle text-xs">
+            {metrics.recentLogs.slice(0, 5).map((log) => (
+              <div
+                key={log.id}
+                className="py-2 flex items-center justify-between gap-4"
+              >
+                <span className="text-ink-primary font-medium">
+                  {formatAuditAction(log.action)}
+                </span>
+                <span className="text-ink-secondary tabular-nums">
+                  {formatDateTimeBR(log.occurredAt)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

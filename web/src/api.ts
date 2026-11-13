@@ -1,26 +1,42 @@
+export type PlanCode = 'STARTER' | 'PRO' | 'ENTERPRISE';
+
+export const PLAN_LIMITS_FALLBACK: Record<PlanCode, { maxActiveResources: number | null; label: string }> = {
+  STARTER: { maxActiveResources: 5, label: 'STARTER' },
+  PRO: { maxActiveResources: 40, label: 'PRO' },
+  ENTERPRISE: { maxActiveResources: null, label: 'ENTERPRISE' },
+};
+
+export function normalizePlanCode(rawPlan?: string | null): PlanCode {
+  const upper = (rawPlan ?? '').trim().toUpperCase();
+  if (upper === 'PRO') return 'PRO';
+  if (upper === 'ENTERPRISE') return 'ENTERPRISE';
+  return 'STARTER';
+}
+
 export interface WorkspaceSummary {
   id: string;
   name: string;
   slug: string;
   role: 'OWNER' | 'ADMIN' | 'COORDINATOR' | 'SPECIALIST';
-  plan: 'STARTER' | 'PRO' | 'ENTERPRISE';
-  subscriptionStatus: string;
+  plan: PlanCode;
+  subscriptionStatus: string | null;
 }
 
 export interface WorkspaceOverview {
   id: string;
   name: string;
   slug: string;
-  role: 'OWNER' | 'ADMIN' | 'COORDINATOR' | 'SPECIALIST';
+  role: 'OWNER' | 'ADMIN' | 'COORDINATOR' | 'SPECIALIST' | null;
   subscription: {
-    plan: 'STARTER' | 'PRO' | 'ENTERPRISE';
+    plan: PlanCode;
     status: string;
     trialEndsAt: string | null;
     currentPeriodEnd: string | null;
-  };
+  } | null;
   entitlements: {
     planLabel: string;
-    isSubscriptionOperational: boolean;
+    subscriptionHealthy: boolean;
+    isSubscriptionOperational?: boolean;
     maxActiveResources: number | null;
     maxBookingsPerMonth: number | null;
     smartWaitlistEnabled: boolean;
@@ -29,9 +45,57 @@ export interface WorkspaceOverview {
     vipWaitlistPriorityEnabled: boolean;
     exportableAuditLogs: boolean;
   };
-  usage: {
-    activeResources: number;
-    maxActiveResources: number | null;
+  quota: {
+    resourcesUsed: number;
+    resourcesMax: number | null;
+    usagePercent: number;
+  };
+  usage?: {
+    activeResources?: number;
+    maxActiveResources?: number | null;
+  };
+}
+
+export function resolveWorkspaceQuota(overview: WorkspaceOverview | null | undefined): {
+  plan: PlanCode;
+  status: string;
+  activeResources: number;
+  maxActiveResources: number | null;
+  isAtQuotaLimit: boolean;
+} {
+  const plan = normalizePlanCode(overview?.subscription?.plan ?? overview?.entitlements?.planLabel);
+  const status = overview?.subscription?.status ?? 'TRIALING';
+  const activeResources =
+    overview?.quota?.resourcesUsed ??
+    overview?.usage?.activeResources ??
+    0;
+
+  const hasExplicitQuota =
+    overview?.quota !== undefined && overview?.quota !== null && 'resourcesMax' in overview.quota;
+  const hasExplicitEntitlement =
+    overview?.entitlements !== undefined && overview?.entitlements !== null && 'maxActiveResources' in overview.entitlements;
+  const hasExplicitUsage =
+    overview?.usage !== undefined && overview?.usage !== null && 'maxActiveResources' in overview.usage;
+
+  const maxActiveResources = hasExplicitQuota
+    ? overview!.quota.resourcesMax
+    : hasExplicitEntitlement
+    ? overview!.entitlements.maxActiveResources
+    : hasExplicitUsage
+    ? (overview!.usage!.maxActiveResources ?? null)
+    : PLAN_LIMITS_FALLBACK[plan].maxActiveResources;
+
+  const isAtQuotaLimit =
+    maxActiveResources !== null &&
+    maxActiveResources !== undefined &&
+    activeResources >= maxActiveResources;
+
+  return {
+    plan,
+    status,
+    activeResources,
+    maxActiveResources,
+    isAtQuotaLimit,
   };
 }
 
@@ -111,8 +175,10 @@ export interface WaitlistEntryDto {
   priority: 'STANDARD' | 'VIP';
   status: 'WAITING' | 'OFFERED' | 'CLAIMED' | 'OFFER_EXPIRED' | 'CANCELLED';
   activeOffer: {
-    slotStartAt: string;
-    slotEndAt: string;
+    offeredStartAt: string;
+    offeredEndAt: string;
+    slotStartAt?: string;
+    slotEndAt?: string;
     reservedResourceIds: string[];
     offeredAt: string;
     expiresAt: string;
@@ -218,6 +284,7 @@ export async function apiRequest<T>(
   const res = await fetch(`/api${path}`, {
     method: options.method ?? 'GET',
     headers,
+    credentials: 'include',
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   });
 

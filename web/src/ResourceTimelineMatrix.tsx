@@ -1,23 +1,51 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ApiHttpError,
-  apiRequest,
   BookableResourceDto,
-  formatMoneyBRL,
+  BookingDto,
+  KpiSummaryDto,
   ServiceProcedureDto,
   TimelineMatrixResponse,
+  WaitlistEntryDto,
 } from './api';
+import { AuditEntryItem } from './AuditView';
 import {
-  Activity,
-  AlertTriangle,
+  BookingDetailsDrawer,
+  TimelineBookingFallback,
+  WaitlistOfferHoldSelection,
+} from './BookingDetailsDrawer';
+import {
+  addDaysToIsoDate,
+  cleanPersonName,
+  formatBookingStatus,
+  formatCapability,
+  formatDateBR,
+  formatPercentBR,
+  formatResourceCategory,
+  formatResourceStatus,
+  formatTimeBR,
+  getClinicMinutesFromMidnight,
+  getTodayClinicIsoDate,
+  RESOURCE_CATEGORY_PLURAL_LABELS,
+} from './labels';
+import {
+  AlertCircle,
   Box,
+  Calendar,
+  CalendarPlus,
+  CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Clock,
-  Layers,
+  Link2,
+  Minus,
   Plus,
-  ShieldAlert,
-  Sparkles,
+  RefreshCw,
+  Rows3,
   Stethoscope,
+  UserCheck,
   Wrench,
+  X,
 } from 'lucide-react';
 
 interface Props {
@@ -27,41 +55,152 @@ interface Props {
   selectedDate: string;
   onDateChange: (date: string) => void;
   procedures: ServiceProcedureDto[];
+  bookings?: BookingDto[];
+  resourcesCatalog?: BookableResourceDto[];
+  auditLogs?: AuditEntryItem[];
+  waitlist?: WaitlistEntryDto[];
+  role?: 'OWNER' | 'ADMIN' | 'COORDINATOR' | 'SPECIALIST' | null;
   onRefresh: () => Promise<void>;
+  onOptimisticStatusUpdate?: (
+    bookingId: string,
+    newStatus: BookingDto['status'],
+    updatedBooking?: BookingDto,
+  ) => void;
+  kpis?: KpiSummaryDto | null;
+  lastUpdatedAt?: Date | null;
+  onQuickSchedule?: (opts?: {
+    resourceId?: string;
+    hour?: number;
+    procedureId?: string;
+    clientName?: string;
+    clientEmail?: string;
+  }) => void;
+  onNavigateToWaitlist?: () => void;
 }
 
-const CATEGORY_META: Record<
+const START_HOUR = 7; // 07:00 America/Sao_Paulo
+const END_HOUR = 20;  // 20:00 America/Sao_Paulo
+const HOURS = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => START_HOUR + i);
+
+const ZOOM_STEPS = [
+  { px: 60 as const, percent: 50 },
+  { px: 96 as const, percent: 75 },
+  { px: 128 as const, percent: 100 },
+];
+
+const CATEGORY_LANE_META: Record<
   'SPECIALIST' | 'ROOM' | 'EQUIPMENT',
-  { label: string; badgeClass: string; icon: React.ReactNode }
+  {
+    pluralLabel: string;
+    icon: React.ReactNode;
+    accentText: string;
+    dotClass: string;
+  }
 > = {
   SPECIALIST: {
-    label: 'SPECIALIST (Especialista)',
-    badgeClass: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
-    icon: <Stethoscope className="w-4 h-4 text-indigo-400" />,
+    pluralLabel: RESOURCE_CATEGORY_PLURAL_LABELS.SPECIALIST,
+    icon: <Stethoscope className="w-4 h-4 text-[var(--res-specialist-text)] shrink-0" />,
+    accentText: 'text-[var(--res-specialist-text)]',
+    dotClass: 'bg-[var(--res-specialist-bar)]',
   },
   ROOM: {
-    label: 'ROOM (Sala Física + Turnaround Estéril)',
-    badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-    icon: <Box className="w-4 h-4 text-emerald-400" />,
+    pluralLabel: RESOURCE_CATEGORY_PLURAL_LABELS.ROOM,
+    icon: <Box className="w-4 h-4 text-[var(--res-room-text)] shrink-0" />,
+    accentText: 'text-[var(--res-room-text)]',
+    dotClass: 'bg-[var(--res-room-bar)]',
   },
   EQUIPMENT: {
-    label: 'EQUIPMENT (Equipamento Escasso)',
-    badgeClass: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
-    icon: <Wrench className="w-4 h-4 text-cyan-400" />,
+    pluralLabel: RESOURCE_CATEGORY_PLURAL_LABELS.EQUIPMENT,
+    icon: <Wrench className="w-4 h-4 text-[var(--res-equipment-text)] shrink-0" />,
+    accentText: 'text-[var(--res-equipment-text)]',
+    dotClass: 'bg-[var(--res-equipment-bar)]',
   },
 };
 
-function getTimelinePositionPercent(iso: string): number {
-  const d = new Date(iso);
-  const minutesFrom07 = (d.getUTCHours() - 7) * 60 + d.getUTCMinutes();
-  const totalWindowMinutes = 13 * 60; // 07:00 to 20:00 UTC (780 min)
-  return Math.max(0, Math.min(100, (minutesFrom07 / totalWindowMinutes) * 100));
+function getBookingStatusStyle(status: string): {
+  blockClass: string;
+  badgeClass: string;
+  icon: React.ReactNode;
+} {
+  switch (status) {
+    case 'CONFIRMED':
+      return {
+        blockClass:
+          'bg-[var(--status-confirmed-bg)] border-[var(--status-confirmed-border)] text-[var(--status-confirmed-text)]',
+        badgeClass:
+          'bg-[var(--status-confirmed-bg)] text-[var(--status-confirmed-text)] border-[var(--status-confirmed-border)]',
+        icon: <CheckCircle2 className="w-3 h-3 text-[var(--status-confirmed-text)] shrink-0" />,
+      };
+    case 'PENDING_DEPOSIT':
+      return {
+        blockClass:
+          'bg-[var(--status-pending-bg)] border-[var(--status-pending-border)] text-[var(--status-pending-text)]',
+        badgeClass:
+          'bg-[var(--status-pending-bg)] text-[var(--status-pending-text)] border-[var(--status-pending-border)]',
+        icon: <Clock className="w-3 h-3 text-[var(--status-pending-text)] shrink-0" />,
+      };
+    case 'CHECKED_IN':
+      return {
+        blockClass:
+          'bg-[var(--status-checkedin-bg)] border-[var(--status-checkedin-border)] text-[var(--status-checkedin-text)]',
+        badgeClass:
+          'bg-[var(--status-checkedin-bg)] text-[var(--status-checkedin-text)] border-[var(--status-checkedin-border)]',
+        icon: <UserCheck className="w-3 h-3 text-[var(--status-checkedin-text)] shrink-0" />,
+      };
+    case 'COMPLETED':
+      return {
+        blockClass:
+          'bg-[var(--status-completed-bg)] border-[var(--status-completed-border)] text-[var(--status-completed-text)]',
+        badgeClass:
+          'bg-[var(--status-completed-bg)] text-[var(--status-completed-text)] border-[var(--status-completed-border)]',
+        icon: <CheckCircle2 className="w-3 h-3 text-[var(--status-completed-text)] shrink-0" />,
+      };
+    case 'NO_SHOW':
+      return {
+        blockClass:
+          'bg-[var(--status-noshow-bg)] border-[var(--status-noshow-border)] text-[var(--status-noshow-text)]',
+        badgeClass:
+          'bg-[var(--status-noshow-bg)] text-[var(--status-noshow-text)] border-[var(--status-noshow-border)]',
+        icon: <AlertCircle className="w-3 h-3 text-[var(--status-noshow-text)] shrink-0" />,
+      };
+    default:
+      return {
+        blockClass: 'bg-sunken border-dashed border-border-strong text-ink-secondary',
+        badgeClass: 'bg-sunken text-ink-secondary border-border-strong',
+        icon: <Clock className="w-3 h-3 text-ink-muted shrink-0" />,
+      };
+  }
 }
 
-function getDurationWidthPercent(startIso: string, endIso: string): number {
-  const diffMin = (new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000;
-  const totalWindowMinutes = 13 * 60;
-  return Math.max(1.2, Math.min(100, (diffMin / totalWindowMinutes) * 100));
+function formatBlockPatientLabel(fullName: string, widthPx: number): string {
+  const clean = cleanPersonName(fullName);
+  const parts = clean.split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return clean;
+  if (widthPx >= 132) return clean;
+  const first = parts[0];
+  const lastInitial = parts[parts.length - 1]?.[0]?.toUpperCase() ?? '';
+  if (widthPx >= 72) {
+    return lastInitial ? `${first} ${lastInitial}.` : first;
+  }
+  const initials = `${first[0] ?? ''}${lastInitial}`.toUpperCase();
+  return initials || first;
+}
+
+function readReservaParamFromUrl(): string | null {
+  if (typeof window === 'undefined') return null;
+  const val = new URLSearchParams(window.location.search).get('reserva');
+  return val && val.trim() ? val.trim() : null;
+}
+
+function writeReservaParamToUrl(bookingId: string | null) {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  if (bookingId) {
+    url.searchParams.set('reserva', bookingId);
+  } else {
+    url.searchParams.delete('reserva');
+  }
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
 export const ResourceTimelineMatrix: React.FC<Props> = ({
@@ -71,404 +210,1173 @@ export const ResourceTimelineMatrix: React.FC<Props> = ({
   selectedDate,
   onDateChange,
   procedures,
+  bookings = [],
+  resourcesCatalog = [],
+  auditLogs = [],
+  waitlist = [],
+  role = null,
   onRefresh,
+  onOptimisticStatusUpdate,
+  kpis,
+  lastUpdatedAt,
+  onQuickSchedule,
+  onNavigateToWaitlist,
 }) => {
-  const [showAddResource, setShowAddResource] = useState(false);
-  const [resName, setResName] = useState('');
-  const [resCategory, setResCategory] = useState<'SPECIALIST' | 'ROOM' | 'EQUIPMENT'>('EQUIPMENT');
-  const [resCaps, setResCaps] = useState('DOPPLER_VASCULAR, USG_DOPPLER_HD');
-  const [errorBanner, setErrorBanner] = useState<{ status: number; code: string; message: string } | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  // Zoom padrão 100% (128px/h) para que reservas de 25 a 45 min mostrem nome + horário sem precisar de hover
+  const [hourWidthPx, setHourWidthPx] = useState<60 | 96 | 128>(128);
+  const [denseRows, setDenseRows] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [hoveredBookingId, setHoveredBookingId] = useState<string | null>(null);
+  const [activePopoverKey, setActivePopoverKey] = useState<string | null>(null);
+  const [capPopoverResourceId, setCapPopoverResourceId] = useState<string | null>(null);
+  const [minutesAgo, setMinutesAgo] = useState(0);
 
-  const hours = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
+  // Estado de seleção persistente (clique / teclado / URL ?reserva=ID)
+  const [selectedBookingId, setSelectedBookingId] = useState<string | null>(() =>
+    readReservaParamFromUrl(),
+  );
+  const [selectedResourceId, setSelectedResourceId] = useState<string | null>(null);
+  const [selectedOfferHold, setSelectedOfferHold] = useState<WaitlistOfferHoldSelection | null>(
+    null,
+  );
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  const handleCreateResource = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorBanner(null);
-    setSubmitting(true);
-    try {
-      await apiRequest<BookableResourceDto>('/resources', {
-        method: 'POST',
-        token,
-        workspaceId,
-        body: {
-          name: resName,
-          category: resCategory,
-          capabilities: resCaps
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean),
-        },
-      });
-      setResName('');
-      setShowAddResource(false);
-      await onRefresh();
-    } catch (err) {
-      if (err instanceof ApiHttpError) {
-        setErrorBanner({ status: err.status, code: err.code, message: err.message });
-      } else {
-        setErrorBanner({ status: 500, code: 'ERROR', message: String(err) });
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const hoverDelayTimerRef = useRef<number | null>(null);
+  const lastFocusedBlockRef = useRef<HTMLButtonElement | null>(null);
+  const blockButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+
+  const totalGridMinutes = (END_HOUR - START_HOUR) * 60;
+  const totalGridWidthPx = HOURS.length * hourWidthPx;
+
+  const currentZoomIndex = ZOOM_STEPS.findIndex((z) => z.px === hourWidthPx);
+  const currentZoomPercent = ZOOM_STEPS[currentZoomIndex]?.percent ?? 100;
+
+  const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+  }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), 4500);
+    return () => window.clearTimeout(t);
+  }, [toast]);
+
+  // Limpa timer de hover ao desmontar
+  useEffect(() => {
+    return () => {
+      if (hoverDelayTimerRef.current !== null) {
+        window.clearTimeout(hoverDelayTimerRef.current);
       }
-    } finally {
-      setSubmitting(false);
+    };
+  }, []);
+
+  // Sincroniza ?reserva=ID com popstate (botão voltar/avançar do navegador)
+  useEffect(() => {
+    const onPopState = () => {
+      setSelectedBookingId(readReservaParamFromUrl());
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  // Atalhos de teclado Alt+Seta Esquerda / Alt+Seta Direita para navegar entre datas
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')
+      ) {
+        return;
+      }
+      if (e.altKey && e.key === 'ArrowLeft') {
+        e.preventDefault();
+        onDateChange(addDaysToIsoDate(selectedDate, -1));
+      } else if (e.altKey && e.key === 'ArrowRight') {
+        e.preventDefault();
+        onDateChange(addDaysToIsoDate(selectedDate, 1));
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedDate, onDateChange]);
+
+  // Contador "Atualizado há X min"
+  useEffect(() => {
+    const updateCounter = () => {
+      if (!lastUpdatedAt) {
+        setMinutesAgo(0);
+        return;
+      }
+      const diff = Math.max(0, Math.floor((Date.now() - lastUpdatedAt.getTime()) / 60000));
+      setMinutesAgo(diff);
+    };
+    updateCounter();
+    const timer = window.setInterval(updateCounter, 15000);
+    return () => window.clearInterval(timer);
+  }, [lastUpdatedAt]);
+
+  // Mapa de todas as alocações por bookingId para destacar o vínculo atômico entre as 3 raias
+  const bookingAllocationsIndex = useMemo(() => {
+    const map = new Map<string, TimelineBookingFallback>();
+
+    for (const row of timeline?.resources ?? []) {
+      for (const alloc of row.allocations) {
+        const cleanClient = cleanPersonName(alloc.clientName);
+        const existing = map.get(alloc.bookingId);
+        if (existing) {
+          existing.resources.push({
+            id: row.resource.id,
+            name: row.resource.name,
+            category: row.resource.category,
+            prepMinutes: alloc.prepMinutes,
+            cleanupMinutes: alloc.cleanupMinutes,
+            effectiveStartAt: alloc.effectiveStartAt,
+            effectiveEndAt: alloc.effectiveEndAt,
+          });
+        } else {
+          map.set(alloc.bookingId, {
+            bookingId: alloc.bookingId,
+            clientName: cleanClient,
+            procedureName: alloc.procedureName,
+            bookingStatus: alloc.bookingStatus,
+            serviceStartAt: alloc.serviceStartAt,
+            serviceEndAt: alloc.serviceEndAt,
+            resources: [
+              {
+                id: row.resource.id,
+                name: row.resource.name,
+                category: row.resource.category,
+                prepMinutes: alloc.prepMinutes,
+                cleanupMinutes: alloc.cleanupMinutes,
+                effectiveStartAt: alloc.effectiveStartAt,
+                effectiveEndAt: alloc.effectiveEndAt,
+              },
+            ],
+          });
+        }
+      }
     }
+    return map;
+  }, [timeline]);
+
+  // Lista ordenada de chaves de blocos para navegação por setas do teclado
+  const orderedBlockKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const category of ['SPECIALIST', 'ROOM', 'EQUIPMENT'] as const) {
+      if (collapsedGroups[category]) continue;
+      const rows = (timeline?.resources ?? []).filter((r) => r.resource.category === category);
+      for (const row of rows) {
+        const sortedAllocs = [...row.allocations].sort(
+          (a, b) => new Date(a.serviceStartAt).getTime() - new Date(b.serviceStartAt).getTime(),
+        );
+        for (const alloc of sortedAllocs) {
+          keys.push(`${alloc.bookingId}-${row.resource.id}`);
+        }
+      }
+    }
+    return keys;
+  }, [timeline, collapsedGroups]);
+
+  // Scroll inicial automático para a reserva selecionada na URL (?reserva=ID) ou primeira alocação do dia
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const selectedInTimeline = selectedBookingId
+      ? bookingAllocationsIndex.get(selectedBookingId)
+      : null;
+
+    const allBookings = [...bookingAllocationsIndex.values()];
+    let targetMinutes = 8 * 60; // 08:00 padrão
+
+    if (selectedInTimeline) {
+      targetMinutes = Math.max(
+        START_HOUR * 60,
+        getClinicMinutesFromMidnight(selectedInTimeline.serviceStartAt) - 30,
+      );
+    } else if (allBookings.length > 0) {
+      const earliestMin = Math.min(
+        ...allBookings.map((b) => getClinicMinutesFromMidnight(b.serviceStartAt)),
+      );
+      targetMinutes = Math.max(START_HOUR * 60, earliestMin - 30);
+    } else if (selectedDate === getTodayClinicIsoDate()) {
+      targetMinutes = Math.max(
+        START_HOUR * 60,
+        getClinicMinutesFromMidnight(new Date().toISOString()) - 60,
+      );
+    }
+    const offsetMinutes = Math.max(0, targetMinutes - START_HOUR * 60);
+    const targetLeftPx = (offsetMinutes / 60) * hourWidthPx;
+    container.scrollLeft = Math.max(0, targetLeftPx - 24);
+  }, [selectedDate, timeline?.date, hourWidthPx, bookingAllocationsIndex, selectedBookingId]);
+
+  const minutesToLeftPx = (iso: string): number => {
+    const min = getClinicMinutesFromMidnight(iso);
+    const offsetMin = Math.max(0, Math.min(totalGridMinutes, min - START_HOUR * 60));
+    return (offsetMin / 60) * hourWidthPx;
   };
 
+  const durationToWidthPx = (startIso: string, endIso: string): number => {
+    const diffMin = Math.max(0, (new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000);
+    return Math.max(12, (diffMin / 60) * hourWidthPx);
+  };
+
+  const handleSelectBooking = useCallback(
+    (bookingId: string, resourceId: string | null, triggerEl?: HTMLButtonElement | null) => {
+      if (hoverDelayTimerRef.current !== null) {
+        window.clearTimeout(hoverDelayTimerRef.current);
+        hoverDelayTimerRef.current = null;
+      }
+      setActivePopoverKey(null);
+      if (triggerEl) {
+        lastFocusedBlockRef.current = triggerEl;
+      }
+      setSelectedOfferHold(null);
+      setSelectedBookingId(bookingId);
+      setSelectedResourceId(resourceId);
+      writeReservaParamToUrl(bookingId);
+    },
+    [],
+  );
+
+  const handleSelectOfferHold = useCallback(
+    (hold: WaitlistOfferHoldSelection, triggerEl?: HTMLButtonElement | null) => {
+      if (hoverDelayTimerRef.current !== null) {
+        window.clearTimeout(hoverDelayTimerRef.current);
+        hoverDelayTimerRef.current = null;
+      }
+      setActivePopoverKey(null);
+      if (triggerEl) {
+        lastFocusedBlockRef.current = triggerEl;
+      }
+      setSelectedBookingId(null);
+      setSelectedResourceId(hold.resourceId);
+      setSelectedOfferHold(hold);
+      writeReservaParamToUrl(null);
+    },
+    [],
+  );
+
+  const handleCloseDrawer = useCallback(() => {
+    setSelectedBookingId(null);
+    setSelectedResourceId(null);
+    setSelectedOfferHold(null);
+    writeReservaParamToUrl(null);
+    const btnToFocus = lastFocusedBlockRef.current;
+    if (btnToFocus && typeof btnToFocus.focus === 'function') {
+      window.setTimeout(() => {
+        btnToFocus.focus();
+      }, 0);
+    }
+  }, []);
+
+  const handleBlockMouseEnter = useCallback((bookingId: string, popoverKey: string) => {
+    setHoveredBookingId(bookingId);
+    if (hoverDelayTimerRef.current !== null) {
+      window.clearTimeout(hoverDelayTimerRef.current);
+    }
+    hoverDelayTimerRef.current = window.setTimeout(() => {
+      setActivePopoverKey(popoverKey);
+    }, 150);
+  }, []);
+
+  const handleBlockMouseLeave = useCallback(() => {
+    if (hoverDelayTimerRef.current !== null) {
+      window.clearTimeout(hoverDelayTimerRef.current);
+      hoverDelayTimerRef.current = null;
+    }
+    setHoveredBookingId(null);
+    setActivePopoverKey(null);
+  }, []);
+
+  const handleBlockKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLButtonElement>, currentKey: string) => {
+      if (
+        e.key === 'ArrowRight' ||
+        e.key === 'ArrowDown' ||
+        e.key === 'ArrowLeft' ||
+        e.key === 'ArrowUp'
+      ) {
+        e.preventDefault();
+        const idx = orderedBlockKeys.indexOf(currentKey);
+        if (idx === -1 || orderedBlockKeys.length === 0) return;
+        const delta = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1;
+        const nextIdx = (idx + delta + orderedBlockKeys.length) % orderedBlockKeys.length;
+        const nextKey = orderedBlockKeys[nextIdx];
+        const nextEl = blockButtonRefs.current[nextKey];
+        if (nextEl) {
+          nextEl.focus();
+        }
+      }
+    },
+    [orderedBlockKeys],
+  );
+
+  // Posição da linha "Agora" quando a data selecionada é hoje
+  const isToday = selectedDate === getTodayClinicIsoDate();
+  const nowMinutes = getClinicMinutesFromMidnight(new Date().toISOString());
+  const showNowLine = isToday && nowMinutes >= START_HOUR * 60 && nowMinutes <= END_HOUR * 60;
+  const nowLeftPx = ((nowMinutes - START_HOUR * 60) / 60) * hourWidthPx;
+
+  // Reserva ativa para destaque (hover tem prioridade visual temporária, seleção mantém fixo)
+  const activeHighlightBookingId = hoveredBookingId ?? selectedBookingId;
+  const activeHighlightBooking = activeHighlightBookingId
+    ? bookingAllocationsIndex.get(activeHighlightBookingId) ?? null
+    : null;
+  const connectorLeftPx = activeHighlightBooking
+    ? minutesToLeftPx(activeHighlightBooking.serviceStartAt) + 12
+    : null;
+
+  const selectedBookingFallback = selectedBookingId
+    ? bookingAllocationsIndex.get(selectedBookingId) ?? null
+    : null;
+
+  // Indicadores operacionais enxutos do dia (máx. 3 indicadores na barra superior da agenda)
+  const avgUtilization = useMemo(() => {
+    if (!kpis?.utilizationByCategory) return 0;
+    const vals = [
+      kpis.utilizationByCategory.SPECIALIST?.utilizationPercent ?? 0,
+      kpis.utilizationByCategory.ROOM?.utilizationPercent ?? 0,
+      kpis.utilizationByCategory.EQUIPMENT?.utilizationPercent ?? 0,
+    ];
+    return Math.round(((vals[0] + vals[1] + vals[2]) / 3) * 10) / 10;
+  }, [kpis]);
+
+  const toggleGroup = (category: string) => {
+    setCollapsedGroups((prev) => ({ ...prev, [category]: !prev[category] }));
+  };
+
+  const rowHeightClass = denseRows ? 'h-12' : 'h-14';
+  const allBookingsList = useMemo(
+    () =>
+      [...bookingAllocationsIndex.values()].sort(
+        (a, b) => new Date(a.serviceStartAt).getTime() - new Date(b.serviceStartAt).getTime(),
+      ),
+    [bookingAllocationsIndex],
+  );
+
+  const isDrawerOpen = Boolean(selectedBookingId || selectedOfferHold);
+
   return (
-    <div className="space-y-6">
-      {/* Header & Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 rounded-xl p-4">
-        <div>
-          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Layers className="w-5 h-5 text-indigo-400" />
-            Matriz de Alocação Simultânea &amp; Turnaround Assimétrico
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Visualize o bloqueio simultâneo de <span className="text-indigo-300 font-medium">SPECIALIST</span> +{' '}
-            <span className="text-emerald-300 font-medium">ROOM</span> +{' '}
-            <span className="text-cyan-300 font-medium">EQUIPMENT</span> e a janela extra de{' '}
-            <span className="text-amber-300 font-medium">Esterilização / Turnaround Buffer</span> pós-procedimento.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5">
-            <Clock className="w-4 h-4 text-slate-400" />
-            <label className="text-xs text-slate-400">Data UTC:</label>
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => onDateChange(e.target.value)}
-              className="bg-transparent text-xs font-mono text-white focus:outline-none"
-            />
-          </div>
-
+    <div className="space-y-4 relative">
+      {/* Toast de feedback de ação otimista */}
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="agenda-toast"
+          className={`fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl border shadow-xl flex items-center gap-2.5 text-xs font-semibold transition-all ${
+            toast.type === 'success'
+              ? 'bg-elevated border-[var(--status-confirmed-border)] text-ink-primary'
+              : 'bg-elevated border-[var(--status-noshow-border)] text-[var(--status-noshow-text)]'
+          }`}
+        >
+          {toast.type === 'success' ? (
+            <CheckCircle2 className="w-4 h-4 text-[var(--status-confirmed-text)] shrink-0" />
+          ) : (
+            <AlertCircle className="w-4 h-4 text-[var(--status-noshow-text)] shrink-0" />
+          )}
+          <span>{toast.message}</span>
           <button
-            onClick={() => {
-              setErrorBanner(null);
-              setShowAddResource((v) => !v);
-            }}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition"
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Fechar notificação"
+            className="p-0.5 rounded hover:bg-sunken text-ink-muted hover:text-ink-primary"
           >
-            <Plus className="w-4 h-4" />
-            Novo BookableResource
-          </button>
-        </div>
-      </div>
-
-      {/* Domain Error Alert (e.g., HTTP 402 QuotaExceededError on Estúdio Aura 5/5) */}
-      {errorBanner && (
-        <div className="bg-rose-950/60 border border-rose-500/50 rounded-xl p-4 flex items-start gap-3">
-          <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <span className="px-2 py-0.5 text-[11px] font-mono font-bold rounded bg-rose-500/20 text-rose-300 border border-rose-500/40">
-                HTTP {errorBanner.status} — {errorBanner.code}
-              </span>
-              <span className="text-sm font-semibold text-rose-200">
-                Regra de Domínio / Entitlement Bloqueou a Operação
-              </span>
-            </div>
-            <p className="text-xs text-rose-300/90 mt-1">{errorBanner.message}</p>
-          </div>
-          <button
-            onClick={() => setErrorBanner(null)}
-            className="text-xs text-rose-300 hover:text-white px-2 py-1"
-          >
-            Fechar
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
-      {/* Quick Form to Create BookableResource (great to test 5/5 STARTER Quota!) */}
-      {showAddResource && (
-        <form
-          onSubmit={handleCreateResource}
-          className="bg-slate-900 border border-indigo-500/40 rounded-xl p-4 space-y-3"
-        >
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-indigo-300">
-              Cadastrar Recurso Alocável (Testa CanRegisterResourceSpecification &amp; PlanQuota)
-            </h3>
+      {/* Faixa fina operacional do dia + Controles da Agenda */}
+      <div className="bg-surface border border-border-subtle rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+        {/* Esquerda: Título + 3 indicadores operacionais do dia */}
+        <div className="flex flex-wrap items-center gap-4">
+          <h1 className="text-base font-semibold text-ink-primary">Agenda</h1>
+
+          <div className="flex flex-wrap items-center gap-3 text-xs border-l border-border-subtle pl-4 tabular-nums">
+            <span className="text-ink-secondary">
+              Ocupação média: <strong className="text-ink-primary">{formatPercentBR(avgUtilization)}</strong>
+            </span>
+            <span className="text-ink-muted">·</span>
+            <span className="text-ink-secondary">
+              Taxa de faltas:{' '}
+              <strong className="text-ink-primary">{formatPercentBR(kpis?.noShowRatePercent ?? 0)}</strong>
+            </span>
+            <span className="text-ink-muted">·</span>
+            <span className="text-ink-secondary">
+              Vagas em oferta: <strong className="text-ink-primary">{kpis?.activeWaitlistOffers ?? 0}</strong>
+            </span>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">Nome do Recurso</label>
-              <input
-                type="text"
-                required
-                placeholder="Ex: Ultrassom Portátil #03"
-                value={resName}
-                onChange={(e) => setResName(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">Categoria</label>
-              <select
-                value={resCategory}
-                onChange={(e) => setResCategory(e.target.value as any)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
-              >
-                <option value="SPECIALIST">SPECIALIST (Profissional)</option>
-                <option value="ROOM">ROOM (Sala / Box Físico)</option>
-                <option value="EQUIPMENT">EQUIPMENT (Equipamento)</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">Capabilities (Tags separadas por vírgula)</label>
-              <input
-                type="text"
-                value={resCaps}
-                onChange={(e) => setResCaps(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white font-mono"
-              />
-            </div>
-          </div>
-          <div className="flex justify-end gap-2">
+        </div>
+
+        {/* Direita: Seletor de data (Hoje + setas), Zoom (− / Zoom 100% / +), Densidade e Status de atualização */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Seletor de data */}
+          <div className="inline-flex items-center bg-canvas border border-border-subtle rounded-lg p-0.5">
             <button
               type="button"
-              onClick={() => setShowAddResource(false)}
-              className="px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-white"
+              onClick={() => onDateChange(getTodayClinicIsoDate())}
+              className="px-2.5 py-1 text-xs font-medium text-ink-secondary hover:text-ink-primary hover:bg-sunken rounded-md transition"
+              title="Ir para hoje"
             >
-              Cancelar
+              Hoje
             </button>
             <button
-              type="submit"
-              disabled={submitting}
-              className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white"
+              type="button"
+              onClick={() => onDateChange(addDaysToIsoDate(selectedDate, -1))}
+              aria-label="Dia anterior"
+              title="Dia anterior (Alt + ←)"
+              className="p-1 text-ink-secondary hover:text-ink-primary hover:bg-sunken rounded-md transition"
             >
-              {submitting ? 'Validando Quota...' : 'Salvar Recurso'}
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <label className="relative inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-ink-primary tabular-nums cursor-pointer">
+              <Calendar className="w-3.5 h-3.5 text-brand" />
+              <span>{formatDateBR(selectedDate)}</span>
+              <input
+                type="date"
+                aria-label="Selecionar data da agenda"
+                value={selectedDate}
+                onChange={(e) => {
+                  if (e.target.value) onDateChange(e.target.value);
+                }}
+                className="sr-only"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => onDateChange(addDaysToIsoDate(selectedDate, 1))}
+              aria-label="Próximo dia"
+              title="Próximo dia (Alt + →)"
+              className="p-1 text-ink-secondary hover:text-ink-primary hover:bg-sunken rounded-md transition"
+            >
+              <ChevronRight className="w-4 h-4" />
             </button>
           </div>
-        </form>
-      )}
 
-      {/* Legend */}
-      <div className="flex flex-wrap items-center gap-6 px-4 py-2.5 bg-slate-900/60 border border-slate-800/80 rounded-lg text-xs">
-        <span className="font-semibold text-slate-300">Legenda da Grade (07:00 — 20:00 UTC):</span>
-        <span className="inline-flex items-center gap-2 text-slate-300">
-          <span className="w-3.5 h-3.5 rounded bg-indigo-600 border border-indigo-400 inline-block" />
-          Janela de Atendimento (<code className="text-indigo-300">serviceSlot</code>)
-        </span>
-        <span className="inline-flex items-center gap-2 text-amber-300">
-          <span className="w-5 h-3.5 rounded bg-buffer-stripes border border-amber-500/60 inline-block" />
-          Turnaround / Esterilização Obrigatória (<code className="text-amber-300">cleanupMinutes</code>)
-        </span>
-        <span className="inline-flex items-center gap-2 text-fuchsia-300">
-          <span className="w-3.5 h-3.5 rounded bg-fuchsia-600/40 border border-fuchsia-400 border-dashed inline-block" />
-          Reserva Temporária de Oferta Ativa (<code className="text-fuchsia-300">SlotOffer Hold</code>)
-        </span>
+          {/* Controle de Zoom (− / Zoom 100% / +) sem termos técnicos "px" */}
+          <div
+            role="group"
+            aria-label="Escala de horário"
+            className="hidden sm:inline-flex items-center gap-0.5 bg-canvas border border-border-subtle rounded-lg p-0.5 text-xs"
+          >
+            <button
+              type="button"
+              aria-label="Diminuir zoom"
+              disabled={currentZoomIndex <= 0}
+              onClick={() => {
+                const prev = ZOOM_STEPS[Math.max(0, currentZoomIndex - 1)];
+                if (prev) setHourWidthPx(prev.px);
+              }}
+              className="p-1 rounded-md text-ink-secondary hover:text-ink-primary hover:bg-sunken disabled:opacity-40 transition"
+              title="Diminuir zoom da grade"
+            >
+              <Minus className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setHourWidthPx(128)}
+              className="px-2 py-0.5 rounded-md text-xs font-medium text-ink-primary tabular-nums hover:bg-sunken transition"
+              title="Restaurar zoom padrão (100%)"
+            >
+              Zoom {currentZoomPercent}%
+            </button>
+            <button
+              type="button"
+              aria-label="Aumentar zoom"
+              disabled={currentZoomIndex >= ZOOM_STEPS.length - 1}
+              onClick={() => {
+                const next = ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, currentZoomIndex + 1)];
+                if (next) setHourWidthPx(next.px);
+              }}
+              className="p-1 rounded-md text-ink-secondary hover:text-ink-primary hover:bg-sunken disabled:opacity-40 transition"
+              title="Aumentar zoom da grade"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Densidade com ícone (Confortável / Compacta) */}
+          <button
+            type="button"
+            onClick={() => setDenseRows((v) => !v)}
+            className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition ${
+              denseRows
+                ? 'bg-sunken text-ink-primary border-border-strong'
+                : 'bg-canvas text-ink-secondary border-border-subtle hover:text-ink-primary'
+            }`}
+            title="Alternar altura das linhas"
+          >
+            <Rows3 className="w-3.5 h-3.5 text-ink-muted" />
+            <span>{denseRows ? 'Compacta' : 'Confortável'}</span>
+          </button>
+
+          {/* Status de atualização automática */}
+          <button
+            type="button"
+            onClick={() => void onRefresh()}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-ink-secondary hover:text-ink-primary bg-canvas border border-border-subtle transition tabular-nums"
+            title="Clique para sincronizar agora"
+          >
+            <RefreshCw className="w-3.5 h-3.5 text-ink-muted" />
+            <span>
+              {minutesAgo === 0 ? 'Atualizado há menos de 1 min' : `Atualizado há ${minutesAgo} min`}
+            </span>
+          </button>
+
+          {onQuickSchedule && (
+            <button
+              type="button"
+              onClick={() => onQuickSchedule()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] text-white transition shadow-xs"
+            >
+              <CalendarPlus className="w-3.5 h-3.5" />
+              Novo agendamento
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Visual Matrix */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-        {/* Time ruler header */}
-        <div className="grid grid-cols-12 border-b border-slate-800 bg-slate-950/70">
-          <div className="col-span-4 px-4 py-2.5 text-xs font-semibold text-slate-400 border-r border-slate-800">
-            Recurso Alocável / Competências
-          </div>
-          <div className="col-span-8 relative h-9 flex items-center">
-            {hours.map((h) => {
-              const leftPct = ((h - 7) / 13) * 100;
+      {/* Legenda compacta e fixa + Chip curto de seleção à direita */}
+      <div className="bg-surface border border-border-subtle rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs">
+        <div className="flex flex-wrap items-center gap-4">
+          <span className="inline-flex items-center gap-1.5 text-ink-secondary">
+            <span className="w-3 h-3 rounded-xs bg-[var(--status-confirmed-bg)] border border-[var(--status-confirmed-border)] inline-block" />
+            Confirmada
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-ink-secondary">
+            <span className="w-3 h-3 rounded-xs bg-[var(--status-pending-bg)] border border-[var(--status-pending-border)] inline-block" />
+            Aguardando sinal
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-ink-secondary">
+            <span className="w-3 h-3 rounded-xs bg-[var(--status-checkedin-bg)] border border-[var(--status-checkedin-border)] inline-block" />
+            Em atendimento
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-ink-secondary">
+            <span className="w-4 h-3 rounded-xs bg-cleanup-stripes border border-[var(--cleanup-border)] inline-block" />
+            Limpeza e esterilização
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-ink-secondary">
+            <span className="w-3 h-3 rounded-xs bg-[var(--brand-subtle)] border border-dashed border-brand inline-block" />
+            Vaga reservada para oferta
+          </span>
+        </div>
+
+        <div className="text-xs text-ink-secondary flex items-center gap-1.5">
+          {activeHighlightBooking ? (
+            selectedBookingId ? (
+              <button
+                type="button"
+                data-testid="active-selection-chip"
+                onClick={handleCloseDrawer}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-brand-tint text-brand-tint-text border border-brand/30 font-semibold tabular-nums hover:opacity-90 transition"
+                title="Limpar seleção (Esc)"
+              >
+                <Link2 className="w-3 h-3 text-brand shrink-0" />
+                <span>
+                  {activeHighlightBooking.clientName} ·{' '}
+                  {formatTimeBR(activeHighlightBooking.serviceStartAt)}
+                </span>
+                <X className="w-3 h-3 shrink-0" />
+              </button>
+            ) : (
+              <span
+                data-testid="active-selection-chip"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-sunken text-ink-primary border border-border-subtle font-medium tabular-nums"
+              >
+                <Link2 className="w-3 h-3 text-brand shrink-0" />
+                <span>
+                  {activeHighlightBooking.clientName} ·{' '}
+                  {formatTimeBR(activeHighlightBooking.serviceStartAt)}
+                </span>
+              </span>
+            )
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-ink-secondary">
+              <Link2 className="w-3.5 h-3.5 text-brand" />
+              <span>Clique em uma reserva para ver detalhes ou editar</span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Visão Desktop / Tablet (>= 768px): Matriz Horizontal de Alocação */}
+      <div className="hidden md:block bg-surface border border-border-subtle rounded-xl overflow-hidden shadow-xs">
+        <div ref={scrollContainerRef} className="overflow-x-auto relative">
+          <div style={{ minWidth: `${256 + totalGridWidthPx}px` }} className="relative">
+            {/* Cabeçalho de Horas Sticky */}
+            <div className="flex border-b border-border-subtle bg-canvas sticky top-0 z-20">
+              <div className="w-64 shrink-0 px-4 py-2.5 text-xs font-semibold text-ink-primary border-r border-border-subtle bg-canvas sticky left-0 z-30 flex items-center justify-between">
+                <span>Recursos</span>
+                <span className="text-ink-muted font-normal">Horário local</span>
+              </div>
+
+              <div className="relative h-9 flex items-stretch" style={{ width: `${totalGridWidthPx}px` }}>
+                {HOURS.map((h) => (
+                  <div
+                    key={h}
+                    style={{ width: `${hourWidthPx}px` }}
+                    className="border-r border-grid-hour px-2 flex items-center text-xs font-medium text-ink-secondary tabular-nums shrink-0 relative"
+                  >
+                    <span>{String(h).padStart(2, '0')}:00</span>
+                    {/* Subdivisões sutis de 15, 30 e 45 minutos no cabeçalho */}
+                    <span className="absolute bottom-0 left-1/4 h-1.5 border-l border-grid-quarter" />
+                    <span className="absolute bottom-0 left-2/4 h-2 border-l border-grid-half" />
+                    <span className="absolute bottom-0 left-3/4 h-1.5 border-l border-grid-quarter" />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Linha vertical de "Agora" */}
+            {showNowLine && (
+              <div
+                aria-hidden="true"
+                style={{ left: `${256 + nowLeftPx}px` }}
+                className="absolute top-9 bottom-0 w-0.5 bg-brand z-15 pointer-events-none"
+              >
+                <span className="absolute -top-6 -left-6 px-1.5 py-0.5 rounded bg-[var(--btn-primary-bg)] text-white text-xs font-medium tabular-nums">
+                  Agora
+                </span>
+              </div>
+            )}
+
+            {/* Raias agrupadas por tipo de recurso */}
+            {(['SPECIALIST', 'ROOM', 'EQUIPMENT'] as const).map((category, categoryIdx) => {
+              const groupRows = (timeline?.resources ?? []).filter(
+                (r) => r.resource.category === category,
+              );
+              const meta = CATEGORY_LANE_META[category];
+              const isCollapsed = Boolean(collapsedGroups[category]);
+
               return (
-                <div
-                  key={h}
-                  style={{ left: `${leftPct}%` }}
-                  className="absolute top-0 bottom-0 border-l border-slate-800/70 pl-1 flex items-center text-[10px] font-mono text-slate-500"
-                >
-                  {String(h).padStart(2, '0')}:00
+                <div key={category} className="border-b border-border-subtle last:border-b-0">
+                  {/* Cabeçalho recolhível do grupo */}
+                  <div className="flex bg-canvas border-b border-border-subtle relative z-15">
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(category)}
+                      className="w-64 shrink-0 px-3.5 py-2 text-left flex items-center justify-between border-r border-border-subtle bg-canvas sticky left-0 z-20 hover:bg-sunken transition"
+                    >
+                      <span className="inline-flex items-center gap-2 text-xs font-semibold text-ink-primary">
+                        <ChevronDown
+                          className={`w-3.5 h-3.5 text-ink-muted transition-transform ${
+                            isCollapsed ? '-rotate-90' : ''
+                          }`}
+                        />
+                        {meta.icon}
+                        <span>{meta.pluralLabel}</span>
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-xs bg-sunken text-ink-secondary border border-border-subtle tabular-nums">
+                        {groupRows.length}
+                      </span>
+                    </button>
+                    <div style={{ width: `${totalGridWidthPx}px` }} className="bg-canvas/60" />
+                  </div>
+
+                  {/* Container das linhas do grupo (linha conectora vertical fica aqui dentro para nunca atravessar cabeçalhos de grupo) */}
+                  {!isCollapsed && (
+                    <div className="relative">
+                      {connectorLeftPx !== null && groupRows.length > 0 && (
+                        <div
+                          aria-hidden="true"
+                          data-testid={`connector-line-${category}`}
+                          style={{ left: `${256 + connectorLeftPx}px` }}
+                          className="absolute top-0 bottom-0 w-[1.5px] bg-brand z-[5] pointer-events-none"
+                        />
+                      )}
+
+                      {groupRows.map(({ resource, allocations, waitlistOfferHolds }, rowIdx) => {
+                        const primaryCap = resource.capabilities[0]
+                          ? formatCapability(resource.capabilities[0])
+                          : formatResourceCategory(resource.category);
+                        const extraCapsCount = Math.max(0, resource.capabilities.length - 1);
+                        const isCapPopoverOpen = capPopoverResourceId === resource.id;
+                        const isTopRow = categoryIdx === 0 && rowIdx === 0;
+
+                        return (
+                          <div
+                            key={resource.id}
+                            className="flex border-b border-grid-row last:border-b-0 hover:bg-sunken/25 transition"
+                          >
+                            {/* Coluna fixa do Recurso (permite até 2 linhas para o nome + papel/categoria abaixo + popover +N) */}
+                            <div
+                              className={`w-64 shrink-0 px-3.5 ${rowHeightClass} border-r border-border-subtle bg-surface sticky left-0 z-20 flex items-center justify-between gap-2 relative`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-start gap-2">
+                                  <span
+                                    className={`w-2 h-2 rounded-full shrink-0 mt-1 ${meta.dotClass}`}
+                                  />
+                                  <span
+                                    title={resource.name}
+                                    className="text-xs font-medium text-ink-primary leading-tight line-clamp-2"
+                                  >
+                                    {resource.name}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-0.5 pl-4 text-[11px] text-ink-secondary truncate">
+                                  <span>{formatResourceStatus(resource.status)}</span>
+                                  <span>·</span>
+                                  <span className="truncate">{primaryCap}</span>
+                                </div>
+                              </div>
+
+                              {extraCapsCount > 0 && (
+                                <div
+                                  className="relative shrink-0"
+                                  onMouseEnter={() => setCapPopoverResourceId(resource.id)}
+                                  onMouseLeave={() => setCapPopoverResourceId(null)}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setCapPopoverResourceId((prev) =>
+                                        prev === resource.id ? null : resource.id,
+                                      );
+                                    }}
+                                    onFocus={() => setCapPopoverResourceId(resource.id)}
+                                    onBlur={() => setCapPopoverResourceId(null)}
+                                    aria-label={`Ver todas as ${resource.capabilities.length} competências de ${resource.name}`}
+                                    className="px-1.5 py-0.5 rounded text-xs font-medium bg-sunken hover:bg-border-subtle text-ink-secondary border border-border-subtle tabular-nums"
+                                  >
+                                    +{extraCapsCount}
+                                  </button>
+
+                                  {isCapPopoverOpen && (
+                                    <div
+                                      role="tooltip"
+                                      className="absolute left-0 top-full mt-1 w-60 p-3 rounded-xl bg-elevated border border-border-strong shadow-xl z-40 space-y-1.5 pointer-events-none"
+                                    >
+                                      <div className="text-xs font-semibold text-ink-primary">
+                                        Competências de {resource.name}
+                                      </div>
+                                      <div className="flex flex-wrap gap-1">
+                                        {resource.capabilities.map((c) => (
+                                          <span
+                                            key={c}
+                                            className="px-2 py-0.5 rounded bg-canvas border border-border-subtle text-xs text-ink-primary"
+                                          >
+                                            {formatCapability(c)}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Faixa de horários do recurso */}
+                            <div
+                              className={`relative ${rowHeightClass} bg-transparent`}
+                              style={{ width: `${totalGridWidthPx}px` }}
+                            >
+                              {/* Células de hora + subdivisões sutis clicáveis para agendamento rápido */}
+                              <div className="absolute inset-0 flex z-0">
+                                {HOURS.map((h) => (
+                                  <button
+                                    key={h}
+                                    type="button"
+                                    onClick={() => {
+                                      if (isDrawerOpen) {
+                                        handleCloseDrawer();
+                                      }
+                                      onQuickSchedule?.({ resourceId: resource.id, hour: h });
+                                    }}
+                                    title={`Agendar às ${String(h).padStart(2, '0')}:00 (${resource.name})`}
+                                    aria-label={`Agendar às ${String(h).padStart(2, '0')}:00 em ${resource.name}`}
+                                    className="h-full border-r border-grid-hour hover:bg-brand-subtle/35 transition relative group shrink-0"
+                                    style={{ width: `${hourWidthPx}px` }}
+                                  >
+                                    <span className="absolute inset-y-0 left-1/4 border-l border-grid-quarter pointer-events-none" />
+                                    <span className="absolute inset-y-0 left-2/4 border-l border-grid-half pointer-events-none" />
+                                    <span className="absolute inset-y-0 left-3/4 border-l border-grid-quarter pointer-events-none" />
+                                  </button>
+                                ))}
+                              </div>
+
+                              {/* Alocações de reservas + Buffer de limpeza */}
+                              {allocations.map((alloc) => {
+                                const cleanClient = cleanPersonName(alloc.clientName);
+                                const serviceLeftPx = minutesToLeftPx(alloc.serviceStartAt);
+                                const rawServiceWidthPx = durationToWidthPx(
+                                  alloc.serviceStartAt,
+                                  alloc.serviceEndAt,
+                                );
+                                // Largura mínima de 72px para que o nome do paciente apareça sempre primeiro
+                                const serviceWidthPx = Math.max(72, rawServiceWidthPx);
+
+                                const hasCleanup = alloc.cleanupMinutes > 0;
+                                const rawCleanupLeftPx = minutesToLeftPx(alloc.serviceEndAt);
+                                const cleanupLeftPx = Math.max(
+                                  rawCleanupLeftPx,
+                                  serviceLeftPx + serviceWidthPx,
+                                );
+                                const cleanupWidthPx = hasCleanup
+                                  ? durationToWidthPx(alloc.serviceEndAt, alloc.effectiveEndAt)
+                                  : 0;
+
+                                const startLabel = formatTimeBR(alloc.serviceStartAt);
+                                const endLabel = formatTimeBR(alloc.serviceEndAt);
+                                const effEndLabel = formatTimeBR(alloc.effectiveEndAt);
+                                const statusStyle = getBookingStatusStyle(alloc.bookingStatus);
+
+                                const isSelected = selectedBookingId === alloc.bookingId;
+                                const isHovered = hoveredBookingId === alloc.bookingId;
+                                const isHighlighted = isSelected || isHovered;
+                                const isDimmed =
+                                  activeHighlightBookingId !== null &&
+                                  activeHighlightBookingId !== alloc.bookingId;
+
+                                const popoverKey = `${alloc.bookingId}-${resource.id}`;
+                                const isPopoverOpen =
+                                  activePopoverKey === popoverKey && !isSelected;
+                                const linkedBooking = bookingAllocationsIndex.get(alloc.bookingId);
+
+                                const patientLabel = formatBlockPatientLabel(
+                                  cleanClient,
+                                  serviceWidthPx,
+                                );
+                                const isWideForProcedure = serviceWidthPx >= 145;
+                                const isNearRightEdge =
+                                  serviceLeftPx > totalGridWidthPx - 340;
+
+                                return (
+                                  <React.Fragment key={popoverKey}>
+                                    {/* Bloco Interativo de Atendimento (<button> focável, clicável e acessível) */}
+                                    <button
+                                      ref={(el) => {
+                                        blockButtonRefs.current[popoverKey] = el;
+                                      }}
+                                      type="button"
+                                      data-testid={`booking-block-${alloc.bookingId}-${resource.id}`}
+                                      data-booking-block="true"
+                                      data-booking-id={alloc.bookingId}
+                                      data-resource-id={resource.id}
+                                      aria-pressed={isSelected}
+                                      aria-label={`${cleanClient}, ${alloc.procedureName}, ${startLabel} a ${endLabel}, ${formatBookingStatus(alloc.bookingStatus)}, ${resource.name}`}
+                                      style={{
+                                        left: `${serviceLeftPx}px`,
+                                        width: `${serviceWidthPx}px`,
+                                      }}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleSelectBooking(
+                                          alloc.bookingId,
+                                          resource.id,
+                                          e.currentTarget,
+                                        );
+                                      }}
+                                      onKeyDown={(e) => handleBlockKeyDown(e, popoverKey)}
+                                      onMouseEnter={() =>
+                                        handleBlockMouseEnter(alloc.bookingId, popoverKey)
+                                      }
+                                      onMouseLeave={handleBlockMouseLeave}
+                                      onFocus={() => {
+                                        setHoveredBookingId(alloc.bookingId);
+                                      }}
+                                      onBlur={() => {
+                                        setHoveredBookingId(null);
+                                        setActivePopoverKey(null);
+                                      }}
+                                      className={`absolute top-1.5 bottom-1.5 min-w-[72px] ${
+                                        hasCleanup && rawCleanupLeftPx >= serviceLeftPx + serviceWidthPx
+                                          ? 'rounded-l-md'
+                                          : 'rounded-md'
+                                      } border px-1.5 flex flex-col justify-center text-left cursor-pointer transition-all select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:ring-offset-surface ${
+                                        statusStyle.blockClass
+                                      } ${
+                                        isPopoverOpen
+                                          ? 'ring-2 ring-brand/80 shadow-md z-50 scale-[1.01]'
+                                          : isSelected
+                                          ? 'ring-2 ring-brand shadow-lg z-30 scale-[1.01]'
+                                          : isHovered
+                                          ? 'ring-2 ring-brand/80 shadow-md z-20 scale-[1.01]'
+                                          : isDimmed
+                                          ? 'opacity-60 z-10'
+                                          : 'z-10 shadow-2xs'
+                                      }`}
+                                    >
+                                      {/* Nome do paciente SEMPRE primeiro (sem ícone nos blocos estreitos para evitar "..." no nome) */}
+                                      <div className="flex items-center gap-1 min-w-0 w-full">
+                                        {serviceWidthPx >= 115 && statusStyle.icon}
+                                        <span className="text-[11px] sm:text-xs font-semibold truncate">
+                                          {patientLabel}
+                                        </span>
+                                      </div>
+
+                                      {/* Horário em segundo lugar (e procedimento quando largo) */}
+                                      {!denseRows && (
+                                        <div className="text-[11px] opacity-90 tabular-nums truncate w-full">
+                                          {isWideForProcedure
+                                            ? `${startLabel}–${endLabel} · ${alloc.procedureName}`
+                                            : `${startLabel}–${endLabel}`}
+                                        </div>
+                                      )}
+
+                                      {/* Hover Card de Prévia (280–340px, delay 150ms, sem truncar texto, pointer-events: none, sem cobrir cabeçalho de horas) */}
+                                      {isPopoverOpen && (
+                                        <div
+                                          role="tooltip"
+                                          data-testid="booking-hover-card"
+                                          className={`absolute ${
+                                            isNearRightEdge ? 'right-0' : 'left-0'
+                                          } ${
+                                            isTopRow ? 'top-full mt-2' : 'bottom-full mb-2'
+                                          } w-[320px] p-3.5 rounded-xl bg-elevated border border-border-strong shadow-2xl z-50 text-left space-y-2.5 pointer-events-none whitespace-normal break-words`}
+                                        >
+                                          <div className="flex items-start justify-between gap-2">
+                                            <div className="min-w-0">
+                                              <div className="text-xs font-bold text-ink-primary">
+                                                {cleanClient}
+                                              </div>
+                                              <div className="text-xs text-ink-secondary mt-0.5 leading-snug">
+                                                {alloc.procedureName}
+                                              </div>
+                                            </div>
+                                            <span
+                                              className={`px-2 py-0.5 text-xs font-medium rounded border shrink-0 ${statusStyle.badgeClass}`}
+                                            >
+                                              {formatBookingStatus(alloc.bookingStatus)}
+                                            </span>
+                                          </div>
+
+                                          <div className="text-xs text-ink-secondary tabular-nums space-y-1 border-t border-border-subtle pt-2">
+                                            <div>
+                                              Atendimento:{' '}
+                                              <strong className="text-ink-primary">
+                                                {startLabel} às {endLabel}
+                                              </strong>
+                                            </div>
+                                            {hasCleanup && (
+                                              <div className="text-ink-secondary">
+                                                Limpeza e esterilização:{' '}
+                                                <strong className="text-ink-primary">
+                                                  +{alloc.cleanupMinutes} min
+                                                </strong>{' '}
+                                                (até {effEndLabel})
+                                              </div>
+                                            )}
+                                          </div>
+
+                                          {linkedBooking && linkedBooking.resources.length > 0 && (
+                                            <div className="border-t border-border-subtle pt-2 space-y-1">
+                                              <div className="text-xs font-medium text-brand flex items-center gap-1">
+                                                <Link2 className="w-3 h-3 shrink-0" />
+                                                <span>Recursos reservados juntos:</span>
+                                              </div>
+                                              {linkedBooking.resources.map((lr) => (
+                                                <div
+                                                  key={lr.id}
+                                                  className="text-xs text-ink-secondary flex items-start justify-between gap-2"
+                                                >
+                                                  <span className="leading-snug">
+                                                    {formatResourceCategory(lr.category)}: {lr.name}
+                                                  </span>
+                                                  {lr.cleanupMinutes > 0 && (
+                                                    <span className="text-ink-muted tabular-nums shrink-0">
+                                                      +{lr.cleanupMinutes} min limpeza
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+
+                                          <div className="border-t border-border-subtle pt-1.5 text-[11px] font-medium text-brand">
+                                            Clique para abrir detalhes e ações da reserva
+                                          </div>
+                                        </div>
+                                      )}
+                                    </button>
+
+                                    {/* Bloco de Limpeza e Esterilização (hachura neutra, clicável para abrir a mesma reserva) */}
+                                    {hasCleanup && (
+                                      <div
+                                        style={{
+                                          left: `${cleanupLeftPx}px`,
+                                          width: `${cleanupWidthPx}px`,
+                                        }}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleSelectBooking(alloc.bookingId, resource.id);
+                                        }}
+                                        onMouseEnter={() => setHoveredBookingId(alloc.bookingId)}
+                                        onMouseLeave={() => setHoveredBookingId(null)}
+                                        title={`Limpeza ${alloc.cleanupMinutes} min (até ${effEndLabel}) — clique para ver a reserva de ${cleanClient}`}
+                                        className={`absolute top-1.5 bottom-1.5 rounded-r-md bg-cleanup-stripes border border-l-0 border-[var(--cleanup-border)] px-1.5 flex items-center justify-center cursor-pointer transition-opacity ${
+                                          isHighlighted
+                                            ? 'ring-1 ring-brand z-20'
+                                            : isDimmed
+                                            ? 'opacity-60 z-10'
+                                            : 'z-10'
+                                        }`}
+                                      >
+                                        {cleanupWidthPx >= 48 && (
+                                          <span className="text-xs text-ink-secondary tabular-nums truncate">
+                                            Limpeza {alloc.cleanupMinutes} min
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </React.Fragment>
+                                );
+                              })}
+
+                              {/* Vagas reservadas para oferta ativa da lista de espera (clicáveis para abrir o Drawer da Oferta) */}
+                              {waitlistOfferHolds.map((hold) => {
+                                const leftPx = minutesToLeftPx(hold.offeredStartAt);
+                                const widthPx = Math.max(
+                                  72,
+                                  durationToWidthPx(hold.offeredStartAt, hold.offeredEndAt),
+                                );
+                                const cleanHoldClient = cleanPersonName(hold.clientName);
+                                const isHoldSelected =
+                                  selectedOfferHold?.waitlistEntryId === hold.waitlistEntryId;
+
+                                return (
+                                  <button
+                                    key={hold.waitlistEntryId}
+                                    type="button"
+                                    data-testid={`offer-hold-block-${hold.waitlistEntryId}`}
+                                    style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSelectOfferHold(
+                                        {
+                                          waitlistEntryId: hold.waitlistEntryId,
+                                          clientName: cleanHoldClient,
+                                          offeredStartAt: hold.offeredStartAt,
+                                          offeredEndAt: hold.offeredEndAt,
+                                          expiresAt: hold.expiresAt,
+                                          resourceId: resource.id,
+                                          resourceName: resource.name,
+                                        },
+                                        e.currentTarget,
+                                      );
+                                    }}
+                                    aria-label={`Vaga reservada para oferta de ${cleanHoldClient}, ${formatTimeBR(hold.offeredStartAt)} a ${formatTimeBR(hold.offeredEndAt)}, expira às ${formatTimeBR(hold.expiresAt)}`}
+                                    title={`Vaga reservada para oferta: ${cleanHoldClient} (expira às ${formatTimeBR(hold.expiresAt)})`}
+                                    className={`absolute top-1.5 bottom-1.5 min-w-[72px] rounded-md bg-[var(--brand-subtle)] border border-dashed border-brand px-2 flex items-center text-left cursor-pointer z-20 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${
+                                      isHoldSelected ? 'ring-2 ring-brand shadow-md z-30' : ''
+                                    }`}
+                                  >
+                                    <span className="text-xs font-medium text-brand truncate">
+                                      Oferta: {cleanHoldClient}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
         </div>
+      </div>
 
-        {/* Rows grouped by resource */}
-        <div className="divide-y divide-slate-800/70">
-          {timeline?.resources.map(({ resource, allocations, waitlistOfferHolds }) => {
-            const meta = CATEGORY_META[resource.category];
+      {/* Visão Mobile e Tablet Estreito (< 768px): Linha do Tempo Vertical por Horário com alvos >= 44px */}
+      <div className="md:hidden space-y-3">
+        <div className="text-xs font-semibold text-ink-secondary px-1">
+          Atendimentos do dia ({formatDateBR(selectedDate)})
+        </div>
+        {allBookingsList.length === 0 ? (
+          <div className="bg-surface border border-border-subtle rounded-xl p-5 text-xs text-ink-secondary text-center">
+            Nenhum atendimento alocado para esta data.
+          </div>
+        ) : (
+          allBookingsList.map((b) => {
+            const style = getBookingStatusStyle(b.bookingStatus);
+            const isSelected = selectedBookingId === b.bookingId;
             return (
-              <div key={resource.id} className="grid grid-cols-12 hover:bg-slate-800/20 transition">
-                {/* Resource column */}
-                <div className="col-span-4 p-3.5 border-r border-slate-800 flex flex-col justify-between">
+              <button
+                key={b.bookingId}
+                type="button"
+                data-testid={`mobile-booking-block-${b.bookingId}`}
+                onClick={(e) => handleSelectBooking(b.bookingId, b.resources[0]?.id ?? null, e.currentTarget)}
+                aria-label={`${b.clientName}, ${b.procedureName}, ${formatTimeBR(b.serviceStartAt)} a ${formatTimeBR(b.serviceEndAt)}, ${formatBookingStatus(b.bookingStatus)}`}
+                className={`w-full min-h-[44px] text-left bg-surface border rounded-xl p-4 space-y-2.5 shadow-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${
+                  isSelected
+                    ? 'border-brand ring-2 ring-brand/40'
+                    : 'border-border-subtle hover:border-border-strong'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
                   <div>
-                    <div className="flex items-center gap-2">
-                      {meta.icon}
-                      <span className="text-sm font-medium text-white">{resource.name}</span>
+                    <div className="text-sm font-semibold text-ink-primary">{b.clientName}</div>
+                    <div className="text-xs font-bold text-brand tabular-nums mt-0.5">
+                      {formatTimeBR(b.serviceStartAt)} – {formatTimeBR(b.serviceEndAt)}
                     </div>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                      <span className={`px-2 py-0.5 text-[10px] font-semibold rounded border ${meta.badgeClass}`}>
-                        {resource.category}
-                      </span>
-                      <span
-                        className={`px-1.5 py-0.5 text-[10px] font-mono rounded ${
-                          resource.status === 'ACTIVE'
-                            ? 'bg-emerald-500/10 text-emerald-400'
-                            : 'bg-amber-500/15 text-amber-300'
-                        }`}
-                      >
-                        {resource.status}
-                      </span>
-                    </div>
+                    <div className="text-xs text-ink-secondary mt-0.5">{b.procedureName}</div>
                   </div>
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {resource.capabilities.map((cap) => (
-                      <span
-                        key={cap}
-                        className="px-1.5 py-0.5 text-[10px] font-mono bg-slate-950 text-slate-400 border border-slate-800 rounded"
-                      >
-                        {cap}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Horizontal timeline bar */}
-                <div className="col-span-8 relative min-h-[78px] bg-slate-950/30">
-                  {/* Hour grid lines */}
-                  {hours.map((h) => {
-                    const leftPct = ((h - 7) / 13) * 100;
-                    return (
-                      <div
-                        key={h}
-                        style={{ left: `${leftPct}%` }}
-                        className="absolute top-0 bottom-0 border-l border-slate-800/40 pointer-events-none"
-                      />
-                    );
-                  })}
-
-                  {/* Active Bookings + Asymmetric Prep & Cleanup Buffers */}
-                  {allocations.map((alloc) => {
-                    const serviceLeft = getTimelinePositionPercent(alloc.serviceStartAt);
-                    const serviceWidth = getDurationWidthPercent(alloc.serviceStartAt, alloc.serviceEndAt);
-
-                    const hasCleanup = alloc.cleanupMinutes > 0;
-                    const cleanupLeft = getTimelinePositionPercent(alloc.serviceEndAt);
-                    const cleanupWidth = hasCleanup
-                      ? getDurationWidthPercent(alloc.serviceEndAt, alloc.effectiveEndAt)
-                      : 0;
-
-                    const startLabel = alloc.serviceStartAt.slice(11, 16);
-                    const endLabel = alloc.serviceEndAt.slice(11, 16);
-                    const effEndLabel = alloc.effectiveEndAt.slice(11, 16);
-
-                    return (
-                      <React.Fragment key={`${alloc.bookingId}-${resource.id}`}>
-                        {/* Main Service Window */}
-                        <div
-                          style={{ left: `${serviceLeft}%`, width: `${serviceWidth}%` }}
-                          title={`${alloc.procedureName} | Paciente: ${alloc.clientName} (${startLabel} - ${endLabel} UTC)`}
-                          className="absolute top-2.5 bottom-2.5 rounded-l-md bg-indigo-600/90 border border-indigo-400 px-2 py-1 overflow-hidden shadow-md flex flex-col justify-center z-10"
-                        >
-                          <div className="text-[11px] font-semibold text-white truncate">
-                            {alloc.clientName}
-                          </div>
-                          <div className="text-[10px] text-indigo-100 font-mono truncate">
-                            {startLabel}–{endLabel} • {alloc.procedureName}
-                          </div>
-                        </div>
-
-                        {/* Asymmetric Turnaround / Sterilization Buffer Window */}
-                        {hasCleanup && (
-                          <div
-                            style={{ left: `${cleanupLeft}%`, width: `${cleanupWidth}%` }}
-                            title={`Turnaround / Esterilização (+${alloc.cleanupMinutes}min) até ${effEndLabel} UTC`}
-                            className="absolute top-2.5 bottom-2.5 rounded-r-md bg-buffer-stripes border border-l-0 border-amber-500/80 px-1.5 flex items-center justify-center z-10"
-                          >
-                            <span className="text-[10px] font-mono font-bold text-amber-300 truncate">
-                              +{alloc.cleanupMinutes}m Esteril.
-                            </span>
-                          </div>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-
-                  {/* Active Waitlist SlotOffer Holds */}
-                  {waitlistOfferHolds.map((hold) => {
-                    const left = getTimelinePositionPercent(hold.offeredStartAt);
-                    const width = getDurationWidthPercent(hold.offeredStartAt, hold.offeredEndAt);
-                    return (
-                      <div
-                        key={hold.waitlistEntryId}
-                        style={{ left: `${left}%`, width: `${width}%` }}
-                        title={`SlotOffer Ativa para ${hold.clientName} (expira às ${hold.expiresAt.slice(11, 16)} UTC)`}
-                        className="absolute top-2 bottom-2 rounded-md bg-fuchsia-600/30 border-2 border-dashed border-fuchsia-400 px-2 flex flex-col justify-center z-20 animate-pulse"
-                      >
-                        <span className="text-[10px] font-bold text-fuchsia-200 truncate">
-                          OFERTA WAITLIST: {hold.clientName}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Procedure Catalog Summary with Asymmetric Turnaround Rules */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-        <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-amber-400" />
-          Catálogo de Procedimentos Complexos (<code className="text-indigo-300">ServiceProcedures</code>) &amp;
-          Requisitos Multi-Recurso
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {procedures.map((proc) => (
-            <div
-              key={proc.id}
-              className="bg-slate-950/80 border border-slate-800 rounded-lg p-3.5 flex flex-col justify-between gap-3"
-            >
-              <div>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-white">{proc.name}</span>
-                  <span className="text-xs font-mono font-bold text-emerald-400">
-                    {formatMoneyBRL(proc.priceCents)}
+                  <span className={`px-2 py-0.5 text-xs rounded border ${style.badgeClass}`}>
+                    {formatBookingStatus(b.bookingStatus)}
                   </span>
                 </div>
-                <div className="text-xs text-slate-400 mt-1 flex flex-wrap gap-3">
-                  <span>Duração Atendimento: {proc.durationMinutes} min</span>
-                  <span>•</span>
-                  <span className="text-amber-300 font-medium">
-                    Sinal Anti-No-Show (SecurityDeposit): {formatMoneyBRL(proc.depositCents)}
-                  </span>
-                </div>
-              </div>
 
-              <div className="space-y-1.5 border-t border-slate-800/80 pt-2.5">
-                <div className="text-[11px] font-semibold text-slate-400">
-                  Alocação Simultânea Obrigatória + TurnaroundBuffers:
-                </div>
-                {proc.requirements.map((req, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center justify-between text-xs bg-slate-900 px-2.5 py-1.5 rounded border border-slate-800/70"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-[11px] font-bold text-indigo-300">{req.category}</span>
-                      <span className="text-slate-400 text-[11px]">
-                        [{req.requiredCapabilities.join(', ')}]
-                      </span>
-                    </div>
-                    <span
-                      className={`text-[11px] font-mono px-1.5 py-0.5 rounded ${
-                        req.cleanupMinutes > 0
-                          ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-                          : 'text-slate-500'
-                      }`}
+                <div className="border-t border-border-subtle pt-2 space-y-1">
+                  {b.resources.map((r) => (
+                    <div
+                      key={r.id}
+                      className="text-xs text-ink-secondary flex items-center justify-between"
                     >
-                      prep: {req.prepMinutes}m | esteril.: +{req.cleanupMinutes}m
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+                      <span>
+                        {formatResourceCategory(r.category)}: {r.name}
+                      </span>
+                      {r.cleanupMinutes > 0 && (
+                        <span className="text-ink-muted tabular-nums">
+                          Limpeza {r.cleanupMinutes} min
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </button>
+            );
+          })
+        )}
       </div>
+
+      {/* Drawer Lateral Compartilhado de Detalhes da Reserva (e Bottom Sheet em 390px) */}
+      <BookingDetailsDrawer
+        open={isDrawerOpen}
+        bookingId={selectedBookingId}
+        focusedResourceId={selectedResourceId}
+        bookings={bookings}
+        fallbackBooking={selectedBookingFallback}
+        procedures={procedures}
+        resourcesCatalog={resourcesCatalog}
+        auditLogs={auditLogs}
+        role={role}
+        token={token}
+        workspaceId={workspaceId}
+        onClose={handleCloseDrawer}
+        onOptimisticStatusUpdate={onOptimisticStatusUpdate}
+        onRefresh={onRefresh}
+        onToast={showToast}
+        onCancelAndRecreate={(prefill) => {
+          handleCloseDrawer();
+          onQuickSchedule?.({
+            procedureId: prefill.procedureId,
+            clientName: prefill.clientName,
+            clientEmail: prefill.clientEmail,
+            hour: prefill.hour,
+          });
+        }}
+        offerHold={selectedOfferHold}
+        waitlistEntries={waitlist}
+        onNavigateToWaitlist={onNavigateToWaitlist}
+      />
     </div>
   );
 };

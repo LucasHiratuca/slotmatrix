@@ -2,22 +2,45 @@ import React, { useEffect, useState } from 'react';
 import {
   ApiHttpError,
   apiRequest,
+  BookableResourceDto,
   BookingDto,
-  formatMoneyBRL,
   ServiceProcedureDto,
 } from './api';
+import { AuditEntryItem } from './AuditView';
+import { BookingDetailsDrawer } from './BookingDetailsDrawer';
 import {
   AlertCircle,
-  CalendarCheck,
+  ArrowRight,
+  Building2,
+  CalendarPlus,
   CheckCircle2,
   Clock,
-  DollarSign,
+  CreditCard,
+  Cpu,
+  Eye,
   Play,
+  Plus,
+  Search,
   ShieldCheck,
+  Sparkles,
   UserCheck,
   UserX,
+  X,
   XCircle,
 } from 'lucide-react';
+import {
+  cleanPersonName,
+  formatApiError,
+  formatBookingStatus,
+  formatCapability,
+  formatCurrencyBRL,
+  formatDateBR,
+  formatDateTimeBR,
+  formatDepositStatus,
+  formatDepositWithPercentage,
+  formatResourceCategory,
+  formatTimeBR,
+} from './labels';
 
 interface AvailableSlotOption {
   startAt: string;
@@ -37,36 +60,100 @@ interface Props {
   token: string;
   workspaceId: string;
   selectedDate: string;
+  onDateChange?: (date: string) => void;
   procedures: ServiceProcedureDto[];
   bookings: BookingDto[];
+  resourcesCatalog?: BookableResourceDto[];
+  auditLogs?: AuditEntryItem[];
+  role?: 'OWNER' | 'ADMIN' | 'COORDINATOR' | 'SPECIALIST' | null;
   onRefresh: () => Promise<void>;
+  onOptimisticStatusUpdate?: (
+    bookingId: string,
+    newStatus: BookingDto['status'],
+    updatedBooking?: BookingDto,
+  ) => void;
+  initialOpenNewBooking?: boolean;
+  initialPrefillHour?: number | null;
+  initialProcedureId?: string | null;
+  initialClientName?: string | null;
+  initialClientEmail?: string | null;
+  onConsumePrefill?: () => void;
 }
 
 const STATUS_BADGE: Record<BookingDto['status'], string> = {
-  PENDING_DEPOSIT: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-  CONFIRMED: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-  CHECKED_IN: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
-  COMPLETED: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
-  CANCELLED: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
-  NO_SHOW: 'bg-red-600/25 text-red-300 border-red-500/40',
-  EXPIRED: 'bg-slate-700/40 text-slate-400 border-slate-600/40',
+  PENDING_DEPOSIT:
+    'bg-[var(--status-pending-bg)] text-[var(--status-pending-text)] border-[var(--status-pending-border)]',
+  CONFIRMED:
+    'bg-[var(--status-confirmed-bg)] text-[var(--status-confirmed-text)] border-[var(--status-confirmed-border)]',
+  CHECKED_IN:
+    'bg-[var(--status-checkedin-bg)] text-[var(--status-checkedin-text)] border-[var(--status-checkedin-border)]',
+  COMPLETED:
+    'bg-[var(--status-completed-bg)] text-[var(--status-completed-text)] border-[var(--status-completed-border)]',
+  CANCELLED:
+    'bg-sunken text-ink-secondary border-border-subtle',
+  NO_SHOW:
+    'bg-[var(--status-noshow-bg)] text-[var(--status-noshow-text)] border-[var(--status-noshow-border)]',
+  EXPIRED:
+    'bg-sunken text-ink-secondary border-border-subtle',
 };
 
 export const SmartBookingWizard: React.FC<Props> = ({
   token,
   workspaceId,
   selectedDate,
+  onDateChange,
   procedures,
   bookings,
+  resourcesCatalog = [],
+  auditLogs = [],
+  role = null,
   onRefresh,
+  onOptimisticStatusUpdate,
+  initialOpenNewBooking = false,
+  initialPrefillHour = null,
+  initialProcedureId = null,
+  initialClientName = null,
+  initialClientEmail = null,
+  onConsumePrefill,
 }) => {
-  const [selectedProcedureId, setSelectedProcedureId] = useState<string>(procedures[0]?.id ?? '');
+  const [showNewBookingPanel, setShowNewBookingPanel] = useState<boolean>(initialOpenNewBooking);
+  const [selectedProcedureId, setSelectedProcedureId] = useState<string>(
+    initialProcedureId || procedures[0]?.id || '',
+  );
   const [availableSlots, setAvailableSlots] = useState<AvailableSlotOption[]>([]);
   const [selectedSlot, setSelectedSlot] = useState<AvailableSlotOption | null>(null);
-  const [clientName, setClientName] = useState('Marina Albuquerque');
-  const [clientEmail, setClientEmail] = useState('marina.albuquerque@cliente.test');
+  const [clientName, setClientName] = useState(initialClientName || 'Marina Albuquerque');
+  const [clientEmail, setClientEmail] = useState(
+    initialClientEmail || 'marina.albuquerque@cliente.test',
+  );
   const [loadingSlots, setLoadingSlots] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [drawerBookingId, setDrawerBookingId] = useState<string | null>(null);
+
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [searchTerm, setSearchTerm] = useState<string>('');
+
+  useEffect(() => {
+    if (initialClientName) {
+      setClientName(initialClientName);
+    }
+    if (initialClientEmail) {
+      setClientEmail(initialClientEmail);
+    }
+  }, [initialClientName, initialClientEmail]);
+
+  useEffect(() => {
+    if (initialOpenNewBooking) {
+      setShowNewBookingPanel(true);
+    }
+  }, [initialOpenNewBooking]);
+
+  useEffect(() => {
+    if (initialProcedureId && procedures.some((p) => p.id === initialProcedureId)) {
+      setSelectedProcedureId(initialProcedureId);
+    }
+  }, [initialProcedureId, procedures]);
 
   useEffect(() => {
     if (procedures.length > 0 && !procedures.some((p) => p.id === selectedProcedureId)) {
@@ -79,15 +166,24 @@ export const SmartBookingWizard: React.FC<Props> = ({
     setLoadingSlots(true);
     setSelectedSlot(null);
     try {
-      const from = `${dateStr}T08:00:00.000Z`;
-      const to = `${dateStr}T18:00:00.000Z`;
+      const from = new Date(`${dateStr}T08:00:00-03:00`).toISOString();
+      const to = new Date(`${dateStr}T18:00:00-03:00`).toISOString();
       const res = await apiRequest<{ availableSlots: AvailableSlotOption[] }>(
         `/procedures/${procId}/available-slots?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&stepMinutes=30`,
         { token, workspaceId },
       );
       setAvailableSlots(res.availableSlots);
       if (res.availableSlots.length > 0) {
-        setSelectedSlot(res.availableSlots[0]);
+        if (initialPrefillHour !== null) {
+          const matched = res.availableSlots.find((s) => {
+            const hh = Number(formatTimeBR(s.startAt).split(':')[0]);
+            return hh === initialPrefillHour;
+          });
+          setSelectedSlot(matched ?? res.availableSlots[0]);
+          onConsumePrefill?.();
+        } else {
+          setSelectedSlot(res.availableSlots[0]);
+        }
       }
     } catch {
       setAvailableSlots([]);
@@ -97,10 +193,10 @@ export const SmartBookingWizard: React.FC<Props> = ({
   };
 
   useEffect(() => {
-    if (selectedProcedureId && selectedDate) {
+    if (selectedProcedureId && selectedDate && showNewBookingPanel) {
       void loadAvailableSlots(selectedProcedureId, selectedDate);
     }
-  }, [selectedProcedureId, selectedDate, workspaceId]);
+  }, [selectedProcedureId, selectedDate, workspaceId, showNewBookingPanel]);
 
   const selectedProc = procedures.find((p) => p.id === selectedProcedureId);
 
@@ -108,6 +204,7 @@ export const SmartBookingWizard: React.FC<Props> = ({
     e.preventDefault();
     if (!selectedSlot || !selectedProcedureId) return;
     setFeedback(null);
+    setSubmitting(true);
     try {
       const created = await apiRequest<BookingDto>('/bookings', {
         method: 'POST',
@@ -122,13 +219,18 @@ export const SmartBookingWizard: React.FC<Props> = ({
       });
       setFeedback({
         type: 'success',
-        text: `Agendamento #${created.id.slice(0, 8)} criado em estado ${created.status} com alocação simultânea de ${created.allocations.length} recursos!`,
+        text: `Reserva criada (${formatBookingStatus(created.status)}) para ${cleanPersonName(created.clientName)} com alocação simultânea de ${created.allocations.length} recursos.`,
       });
       await onRefresh();
       await loadAvailableSlots(selectedProcedureId, selectedDate);
     } catch (err) {
-      const msg = err instanceof ApiHttpError ? `[HTTP ${err.status} ${err.code}] ${err.message}` : String(err);
+      const msg =
+        err instanceof ApiHttpError
+          ? formatApiError(err.message, err.code)
+          : formatApiError(String(err));
       setFeedback({ type: 'error', text: msg });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -144,157 +246,266 @@ export const SmartBookingWizard: React.FC<Props> = ({
         workspaceId,
         body:
           action === 'cancel'
-            ? { reason: 'Cancelamento acionado na central operacional — disparando Smart Waitlist' }
+            ? { reason: 'Cancelamento solicitado na central operacional — ofertando vaga para a lista de espera' }
             : {},
       });
-      const extra =
+      const actionDetails =
         action === 'cancel'
-          ? ` | Retido: ${formatMoneyBRL(updated.retainedCents)} • Reembolsado: ${formatMoneyBRL(updated.refundedCents)} • Smart Waitlist notificada automaticamente!`
+          ? ` · Retido: ${formatCurrencyBRL(updated.retainedCents)} · Reembolsado: ${formatCurrencyBRL(updated.refundedCents)}. Se houver candidatos na lista de espera, uma vaga reservada para oferta foi enviada.`
+          : action === 'no-show'
+          ? ` · Sinal retido: ${formatCurrencyBRL(updated.retainedCents)}.`
           : '';
       setFeedback({
         type: 'success',
-        text: `Reserva de ${updated.clientName} atualizada para ${updated.status}${extra}`,
+        text: `Reserva atualizada para "${formatBookingStatus(updated.status)}"${actionDetails}`,
       });
       await onRefresh();
-      await loadAvailableSlots(selectedProcedureId, selectedDate);
+      if (selectedProcedureId && showNewBookingPanel) {
+        await loadAvailableSlots(selectedProcedureId, selectedDate);
+      }
     } catch (err) {
-      const msg = err instanceof ApiHttpError ? `[HTTP ${err.status} ${err.code}] ${err.message}` : String(err);
+      const msg =
+        err instanceof ApiHttpError
+          ? formatApiError(err.message, err.code)
+          : formatApiError(String(err));
       setFeedback({ type: 'error', text: msg });
     }
   };
 
+  const filteredBookings = bookings.filter((b) => {
+    if (statusFilter !== 'ALL' && b.status !== statusFilter) return false;
+    if (searchTerm.trim()) {
+      const q = searchTerm.toLowerCase();
+      return (
+        cleanPersonName(b.clientName).toLowerCase().includes(q) ||
+        b.clientEmail.toLowerCase().includes(q) ||
+        b.procedureName.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
   return (
     <div className="space-y-6">
+      {/* Cabeçalho da página de Reservas */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-surface border border-border-subtle rounded-xl p-5 shadow-xs">
+        <div>
+          <h1 className="text-lg font-semibold text-ink-primary">Reservas</h1>
+          <p className="text-xs text-ink-secondary mt-0.5">
+            Acompanhe todas as reservas da clínica, gerencie sinais de reserva e crie novos agendamentos com alocação simultânea de recursos.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowNewBookingPanel((prev) => !prev)}
+          className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold transition ${
+            showNewBookingPanel
+              ? 'bg-sunken text-ink-primary hover:bg-border-subtle border border-border-subtle'
+              : 'bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] text-white shadow-xs'
+          }`}
+        >
+          {showNewBookingPanel ? (
+            <>
+              <X className="w-4 h-4" /> Fechar novo agendamento
+            </>
+          ) : (
+            <>
+              <Plus className="w-4 h-4" /> Novo agendamento
+            </>
+          )}
+        </button>
+      </div>
+
       {feedback && (
         <div
           className={`p-4 rounded-xl border flex items-center justify-between ${
             feedback.type === 'success'
-              ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-200'
-              : 'bg-rose-950/60 border-rose-500/40 text-rose-200'
+              ? 'bg-[var(--status-confirmed-bg)] border-[var(--status-confirmed-border)] text-[var(--status-confirmed-text)]'
+              : 'bg-[var(--status-noshow-bg)] border-[var(--status-noshow-border)] text-[var(--status-noshow-text)]'
           }`}
         >
           <div className="flex items-center gap-2.5 text-xs font-medium">
             {feedback.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
             ) : (
-              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <AlertCircle className="w-4 h-4 shrink-0" />
             )}
             <span>{feedback.text}</span>
           </div>
-          <button onClick={() => setFeedback(null)} className="text-xs opacity-75 hover:opacity-100">
+          <button
+            type="button"
+            onClick={() => setFeedback(null)}
+            className="text-xs opacity-75 hover:opacity-100"
+          >
             Fechar
           </button>
         </div>
       )}
 
-      {/* Multi-Resource Smart Booking Wizard */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-        <h2 className="text-base font-semibold text-white flex items-center gap-2">
-          <CalendarCheck className="w-5 h-5 text-indigo-400" />
-          Smart Multi-Resource Booking Wizard (Interseção Livre + Buffers Assimétricos)
-        </h2>
-        <p className="text-xs text-slate-400 mt-1">
-          O motor <code className="text-indigo-300">MultiResourceAvailabilityDomainService</code> varre todos os
-          recursos qualificados e exibe apenas os horários em que Especialista, Sala (com janela extra de
-          esterilização) e Equipamento estão simultaneamente livres.
-        </p>
-
-        <form onSubmit={handleScheduleBooking} className="mt-4 grid grid-cols-1 lg:grid-cols-12 gap-5">
-          {/* Left column: procedure & client */}
-          <div className="lg:col-span-5 space-y-3.5">
+      {/* Fluxo "Novo agendamento" */}
+      {showNewBookingPanel && (
+        <div className="bg-surface border border-brand/30 rounded-xl p-6 shadow-md">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-border-subtle">
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                1. Selecione o Procedimento (<code className="text-indigo-300">ServiceProcedure</code>)
-              </label>
-              <select
-                value={selectedProcedureId}
-                onChange={(e) => setSelectedProcedureId(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
-              >
-                {procedures.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.durationMinutes}m — {formatMoneyBRL(p.priceCents)})
-                  </option>
-                ))}
-              </select>
+              <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-[var(--brand-subtle)] border border-brand/30 text-brand text-xs font-medium mb-2">
+                <Sparkles className="w-3.5 h-3.5" /> Alocação combinada de especialista, sala e equipamento
+              </div>
+              <h2 className="text-base font-semibold text-ink-primary flex items-center gap-2">
+                <CalendarPlus className="w-5 h-5 text-brand" />
+                Novo agendamento
+              </h2>
+              <p className="text-xs text-ink-secondary mt-1">
+                O sistema cruza as janelas de trabalho, preparo, atendimento e limpeza de cada recurso exigido pelo procedimento antes de liberar um horário.
+              </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            {onDateChange && (
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Nome do Paciente / Cliente</label>
+                <label className="block text-xs text-ink-secondary mb-1 font-medium">
+                  Data do atendimento
+                </label>
                 <input
-                  type="text"
-                  required
-                  value={clientName}
-                  onChange={(e) => setClientName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => onDateChange(e.target.value)}
+                  className="bg-canvas border border-border-subtle rounded-lg px-3 py-2 text-xs text-ink-primary focus:outline-none focus:border-brand tabular-nums"
                 />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">E-mail do Cliente</label>
-                <input
-                  type="email"
-                  required
-                  value={clientEmail}
-                  onChange={(e) => setClientEmail(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
-                />
-              </div>
-            </div>
-
-            {selectedProc && (
-              <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-3 space-y-1.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-400">Valor Total do Procedimento:</span>
-                  <span className="font-mono font-bold text-white">{formatMoneyBRL(selectedProc.priceCents)}</span>
-                </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-amber-300 flex items-center gap-1">
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    Sinal Anti-No-Show (<code className="font-mono">SecurityDeposit</code>):
-                  </span>
-                  <span className="font-mono font-bold text-amber-300">
-                    {formatMoneyBRL(selectedProc.depositCents)}
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-500">
-                  Política de Cancelamento: Reembolso 100% até {selectedProc.cancellationPolicy.fullRefundThresholdHours}h
-                  antes; retenção de {selectedProc.cancellationPolicy.partialRetentionPercent}% entre{' '}
-                  {selectedProc.cancellationPolicy.partialRefundThresholdHours}h e{' '}
-                  {selectedProc.cancellationPolicy.fullRefundThresholdHours}h; retenção 100% em No-Show.
-                </p>
               </div>
             )}
           </div>
 
-          {/* Right column: available slots & resource breakdown */}
-          <div className="lg:col-span-7 space-y-3.5">
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                2. Horários Viáveis em {selectedDate} (UTC)
-              </label>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mt-6">
+            {/* Seleção de Procedimento */}
+            <div className="lg:col-span-4 space-y-3">
+              <h3 className="text-xs font-semibold text-ink-primary">
+                Escolha o procedimento
+              </h3>
+              <div className="space-y-2.5">
+                {procedures.map((proc) => {
+                  const isSelected = proc.id === selectedProcedureId;
+                  return (
+                    <button
+                      key={proc.id}
+                      type="button"
+                      onClick={() => setSelectedProcedureId(proc.id)}
+                      className={`w-full text-left p-3.5 rounded-xl border transition ${
+                        isSelected
+                          ? 'bg-[var(--brand-subtle)] border-brand ring-1 ring-brand/40'
+                          : 'bg-canvas border-border-subtle hover:border-border-strong'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-sm text-ink-primary">
+                          {proc.name}
+                        </span>
+                        <span className="text-xs font-semibold text-[var(--status-confirmed-text)] tabular-nums">
+                          {formatCurrencyBRL(proc.priceCents)}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2 text-xs text-ink-secondary">
+                        <span className="px-2 py-0.5 rounded bg-surface border border-border-subtle tabular-nums">
+                          Atendimento: {proc.durationMinutes} min
+                        </span>
+                        {proc.depositCents > 0 && (
+                          <span className="px-2 py-0.5 rounded bg-[var(--status-pending-bg)] border border-[var(--status-pending-border)] text-[var(--status-pending-text)] flex items-center gap-1 tabular-nums">
+                            <ShieldCheck className="w-3 h-3" /> Sinal de reserva:{' '}
+                            {formatDepositWithPercentage(proc.depositCents, proc.priceCents)}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="mt-2.5 pt-2 border-t border-border-subtle space-y-1">
+                        {proc.requirements.map((req, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between text-xs text-ink-secondary"
+                          >
+                            <span className="flex items-center gap-1 font-medium text-ink-primary">
+                              {req.category === 'SPECIALIST' && (
+                                <UserCheck className="w-3 h-3 text-[var(--res-specialist-text)]" />
+                              )}
+                              {req.category === 'ROOM' && (
+                                <Building2 className="w-3 h-3 text-[var(--res-room-text)]" />
+                              )}
+                              {req.category === 'EQUIPMENT' && (
+                                <Cpu className="w-3 h-3 text-[var(--res-equipment-text)]" />
+                              )}
+                              {formatResourceCategory(req.category)}:{' '}
+                              {req.requiredCapabilities.map(formatCapability).join(', ')}
+                            </span>
+                            <span className="text-ink-secondary tabular-nums">
+                              Preparo {req.prepMinutes}m · Limpeza {req.cleanupMinutes}m
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Seleção de Horário Disponível */}
+            <div className="lg:col-span-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-ink-primary">
+                  Horários disponíveis ({formatDateBR(selectedDate)})
+                </h3>
+                <span className="text-xs text-brand font-medium tabular-nums">
+                  {availableSlots.length} opções
+                </span>
+              </div>
+
               {loadingSlots ? (
-                <div className="text-xs text-slate-400 py-4">Calculando interseção multi-recurso...</div>
+                <div className="p-8 text-center text-ink-secondary text-xs bg-canvas rounded-xl border border-border-subtle">
+                  Calculando disponibilidade simultânea de recursos...
+                </div>
               ) : availableSlots.length === 0 ? (
-                <div className="text-xs text-amber-300 bg-amber-950/30 border border-amber-500/30 rounded-lg p-3">
-                  Nenhum horário disponível para os 3 recursos simultâneos nesta data.
+                <div className="p-6 text-center bg-canvas rounded-xl border border-border-subtle space-y-2">
+                  <Clock className="w-6 h-6 text-[var(--status-pending-text)] mx-auto" />
+                  <p className="text-xs font-medium text-ink-primary">
+                    Nenhum horário com todos os recursos disponíveis nesta data.
+                  </p>
+                  <p className="text-xs text-ink-secondary">
+                    Escolha outra data ou inclua o paciente na Lista de espera.
+                  </p>
                 </div>
               ) : (
-                <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto p-1">
+                <div className="grid grid-cols-1 gap-2 max-h-[360px] overflow-y-auto pr-1">
                   {availableSlots.map((slot) => {
-                    const active = selectedSlot?.startAt === slot.startAt;
+                    const isSelected = selectedSlot?.startAt === slot.startAt;
                     return (
                       <button
                         type="button"
                         key={slot.startAt}
                         onClick={() => setSelectedSlot(slot)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-mono border transition ${
-                          active
-                            ? 'bg-indigo-600 text-white border-indigo-400 font-bold shadow'
-                            : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                        className={`p-3 rounded-xl border text-left transition ${
+                          isSelected
+                            ? 'bg-[var(--status-confirmed-bg)] border-[var(--status-confirmed-border)] ring-1 ring-[var(--status-confirmed-border)]'
+                            : 'bg-canvas border-border-subtle hover:border-border-strong'
                         }`}
                       >
-                        {slot.startAt.slice(11, 16)} – {slot.endAt.slice(11, 16)}
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-semibold text-ink-primary flex items-center gap-1.5 tabular-nums">
+                            <Clock className="w-4 h-4 text-[var(--status-confirmed-text)]" />
+                            {formatTimeBR(slot.startAt)} – {formatTimeBR(slot.endAt)}
+                          </span>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--status-confirmed-bg)] text-[var(--status-confirmed-text)] border border-[var(--status-confirmed-border)] tabular-nums">
+                            {slot.allocations.length} recursos livres
+                          </span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {slot.allocations.map((a) => (
+                            <span
+                              key={a.resourceId}
+                              className="text-xs px-2 py-0.5 rounded bg-surface text-ink-secondary border border-border-subtle"
+                            >
+                              {formatResourceCategory(a.category)}:{' '}
+                              <strong className="text-ink-primary">{a.resourceName}</strong>
+                            </span>
+                          ))}
+                        </div>
                       </button>
                     );
                   })}
@@ -302,167 +513,290 @@ export const SmartBookingWizard: React.FC<Props> = ({
               )}
             </div>
 
-            {selectedSlot && (
-              <div className="bg-slate-950 border border-indigo-500/30 rounded-lg p-3 space-y-2">
-                <div className="text-xs font-semibold text-indigo-300">
-                  Recursos que serão bloqueados atomicamente neste horário:
+            {/* Dados do Paciente e Confirmação */}
+            <div className="lg:col-span-4 space-y-3">
+              <h3 className="text-xs font-semibold text-ink-primary">
+                Dados do paciente e confirmação
+              </h3>
+              <form
+                onSubmit={handleScheduleBooking}
+                className="bg-canvas border border-border-subtle rounded-xl p-4 space-y-3.5"
+              >
+                <div>
+                  <label className="block text-xs text-ink-secondary mb-1">
+                    Nome completo do paciente
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={clientName}
+                    onChange={(e) => setClientName(e.target.value)}
+                    className="w-full bg-surface border border-border-subtle rounded-lg px-3 py-2 text-xs text-ink-primary"
+                  />
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                  {selectedSlot.allocations.map((a) => (
-                    <div
-                      key={a.resourceId}
-                      className="bg-slate-900 border border-slate-800 rounded p-2 text-[11px]"
-                    >
-                      <div className="font-mono font-bold text-indigo-300">{a.category}</div>
-                      <div className="text-white font-medium truncate">{a.resourceName}</div>
-                      <div className="text-slate-400 font-mono mt-1">
-                        Ocupado: {a.effectiveStartAt.slice(11, 16)}–{a.effectiveEndAt.slice(11, 16)}
-                        {a.cleanupMinutes > 0 && (
-                          <span className="text-amber-300 block">
-                            (inclui +{a.cleanupMinutes}m esteril.)
-                          </span>
+                <div>
+                  <label className="block text-xs text-ink-secondary mb-1">
+                    E-mail do paciente
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={clientEmail}
+                    onChange={(e) => setClientEmail(e.target.value)}
+                    className="w-full bg-surface border border-border-subtle rounded-lg px-3 py-2 text-xs text-ink-primary"
+                  />
+                </div>
+
+                {selectedSlot && selectedProc ? (
+                  <div className="p-3 rounded-lg bg-[var(--brand-subtle)] border border-brand/30 space-y-1.5 text-xs">
+                    <div className="font-semibold text-brand">
+                      Resumo da reserva:
+                    </div>
+                    <div className="text-ink-secondary">
+                      Procedimento: <strong className="text-ink-primary">{selectedProc.name}</strong>
+                    </div>
+                    <div className="text-ink-secondary tabular-nums">
+                      Horário:{' '}
+                      <strong className="text-ink-primary">
+                        {formatDateBR(selectedDate)} · {formatTimeBR(selectedSlot.startAt)} às{' '}
+                        {formatTimeBR(selectedSlot.endAt)}
+                      </strong>
+                    </div>
+                    {selectedProc.depositCents > 0 && (
+                      <div className="text-[var(--status-pending-text)] font-medium pt-1 tabular-nums">
+                        Sinal de reserva:{' '}
+                        {formatDepositWithPercentage(
+                          selectedProc.depositCents,
+                          selectedProc.priceCents,
                         )}
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-lg bg-surface border border-border-subtle text-xs text-ink-secondary text-center">
+                    Selecione um horário disponível ao lado para habilitar a reserva.
+                  </div>
+                )}
 
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={!selectedSlot}
-                className="px-5 py-2.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition"
-              >
-                Alocar Recursos Atomicamente &amp; Agendar
-              </button>
+                <button
+                  type="submit"
+                  disabled={!selectedSlot || submitting}
+                  className="w-full py-2.5 px-4 rounded-lg text-xs font-semibold bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] disabled:opacity-40 text-white transition flex items-center justify-center gap-2 shadow-xs"
+                >
+                  {submitting ? (
+                    'Registrando reserva...'
+                  ) : (
+                    <>
+                      Confirmar reserva
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </form>
             </div>
           </div>
-        </form>
-      </div>
+        </div>
+      )}
 
-      {/* Bookings Table & Lifecycle State Machine */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-        <div className="flex items-center justify-between mb-4">
+      {/* Lista de Reservas */}
+      <div className="bg-surface border border-border-subtle rounded-xl p-5 shadow-xs">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
           <div>
-            <h3 className="text-sm font-semibold text-white">
-              Máquina de Estados de Agendamentos (<code className="text-indigo-300">Booking Aggregate</code>)
-            </h3>
-            <p className="text-xs text-slate-400">
-              Dica: Cancele o agendamento confirmado de <strong>Roberto Almeida (09:00)</strong> para ver o motor
-              reativo disparar uma <code>SlotOffer</code> automática para a 1ª paciente da Smart Waitlist!
+            <h2 className="text-sm font-semibold text-ink-primary">
+              Reservas registradas ({filteredBookings.length})
+            </h2>
+            <p className="text-xs text-ink-secondary mt-0.5">
+              Gerencie o andamento de cada atendimento: confirmação de sinal de reserva, entrada do paciente, conclusão, falta ou cancelamento com acionamento automático da lista de espera.
             </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-ink-muted absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Buscar paciente ou procedimento..."
+                className="bg-canvas border border-border-subtle rounded-lg pl-8 pr-3 py-1.5 text-xs text-ink-primary placeholder-ink-muted focus:outline-none focus:border-brand"
+              />
+            </div>
+
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="bg-canvas border border-border-subtle rounded-lg px-3 py-1.5 text-xs text-ink-primary focus:outline-none focus:border-brand"
+            >
+              <option value="ALL">Todos os status ({bookings.length})</option>
+              <option value="CONFIRMED">Confirmada</option>
+              <option value="PENDING_DEPOSIT">Aguardando sinal</option>
+              <option value="CHECKED_IN">Em atendimento</option>
+              <option value="COMPLETED">Concluída</option>
+              <option value="NO_SHOW">Falta registrada</option>
+              <option value="CANCELLED">Cancelada</option>
+            </select>
           </div>
         </div>
 
         <div className="space-y-3">
-          {bookings.map((b) => (
-            <div
-              key={b.id}
-              className="bg-slate-950/90 border border-slate-800 rounded-lg p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
-            >
-              <div className="space-y-1.5">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold text-white">{b.clientName}</span>
-                  <span className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded border ${STATUS_BADGE[b.status]}`}>
-                    {b.status}
-                  </span>
-                  {b.originWaitlistEntryId && (
-                    <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40">
-                      Recuperado via Smart Waitlist
+          {filteredBookings.map((b) => {
+            const cleanClient = cleanPersonName(b.clientName);
+            return (
+              <div
+                key={b.id}
+                className="bg-canvas border border-border-subtle rounded-lg p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+              >
+                <div className="space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-ink-primary">
+                      {cleanClient}
                     </span>
-                  )}
-                </div>
-
-                <div className="text-xs text-slate-300 font-medium">
-                  {b.procedureName} •{' '}
-                  <span className="font-mono text-indigo-300">
-                    {b.startAt.slice(0, 10)} {b.startAt.slice(11, 16)}–{b.endAt.slice(11, 16)} UTC
-                  </span>
-                </div>
-
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {b.allocations.map((a) => (
                     <span
-                      key={a.resourceId}
-                      className="px-2 py-0.5 text-[10px] font-mono rounded bg-slate-900 border border-slate-800 text-slate-300"
+                      className={`px-2 py-0.5 text-xs font-semibold rounded border ${STATUS_BADGE[b.status]}`}
                     >
-                      {a.category}: {a.resourceName} ({a.effectiveStartAt.slice(11, 16)}–
-                      {a.effectiveEndAt.slice(11, 16)})
+                      {formatBookingStatus(b.status)}
                     </span>
-                  ))}
+                    {b.originWaitlistEntryId && (
+                      <span className="px-2 py-0.5 text-xs font-semibold rounded bg-[var(--status-pending-bg)] text-[var(--status-pending-text)] border border-[var(--status-pending-border)]">
+                        Recuperada pela lista de espera
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="text-xs text-ink-secondary font-medium tabular-nums">
+                    {b.procedureName} ·{' '}
+                    <span className="text-brand font-semibold">
+                      {formatDateTimeBR(b.startAt)} às {formatTimeBR(b.endAt)}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {b.allocations.map((a) => (
+                      <span
+                        key={a.resourceId}
+                        className="px-2 py-0.5 text-xs rounded bg-surface border border-border-subtle text-ink-secondary tabular-nums"
+                      >
+                        {formatResourceCategory(a.category)}: {a.resourceName} (
+                        {formatTimeBR(a.effectiveStartAt)}–{formatTimeBR(a.effectiveEndAt)})
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="text-xs text-ink-secondary flex flex-wrap gap-4 pt-1 tabular-nums">
+                    <span>Valor: {formatCurrencyBRL(b.priceCents)}</span>
+                    <span>
+                      Sinal de reserva ({formatDepositStatus(b.depositStatus)}):{' '}
+                      {formatDepositWithPercentage(b.depositCents, b.priceCents)}
+                    </span>
+                    {(b.retainedCents > 0 || b.refundedCents > 0) && (
+                      <span className="text-[var(--status-pending-text)] font-medium">
+                        Retido: {formatCurrencyBRL(b.retainedCents)} · Reembolsado:{' '}
+                        {formatCurrencyBRL(b.refundedCents)}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                <div className="text-[11px] text-slate-400 flex flex-wrap gap-4 pt-1">
-                  <span>Preço: {formatMoneyBRL(b.priceCents)}</span>
-                  <span>
-                    Sinal ({b.depositStatus}): {formatMoneyBRL(b.depositCents)}
-                  </span>
-                  {(b.retainedCents > 0 || b.refundedCents > 0) && (
-                    <span className="text-amber-300 font-mono">
-                      Liquidação Penalty → Retido: {formatMoneyBRL(b.retainedCents)} | Reembolsado:{' '}
-                      {formatMoneyBRL(b.refundedCents)}
-                    </span>
+                {/* Botões de ação */}
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setDrawerBookingId(b.id)}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-surface hover:bg-sunken text-ink-primary border border-border-subtle transition"
+                  >
+                    <Eye className="w-3.5 h-3.5 text-ink-muted" />
+                    Ver detalhes
+                  </button>
+
+                  {b.status === 'PENDING_DEPOSIT' && (
+                    <button
+                      type="button"
+                      onClick={() => void handleLifecycleAction(b.id, 'confirm-deposit')}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--status-confirmed-border)] hover:opacity-90 text-white transition"
+                    >
+                      <CreditCard className="w-3.5 h-3.5" />
+                      Confirmar sinal
+                    </button>
+                  )}
+
+                  {b.status === 'CONFIRMED' && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void handleLifecycleAction(b.id, 'check-in')}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] text-white transition"
+                      >
+                        <UserCheck className="w-3.5 h-3.5" />
+                        Registrar chegada
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleLifecycleAction(b.id, 'no-show')}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-surface hover:bg-sunken text-[var(--status-pending-text)] border border-[var(--status-pending-border)] transition"
+                      >
+                        <UserX className="w-3.5 h-3.5" />
+                        Registrar falta
+                      </button>
+                    </>
+                  )}
+
+                  {b.status === 'CHECKED_IN' && (
+                    <button
+                      type="button"
+                      onClick={() => void handleLifecycleAction(b.id, 'complete')}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] text-white transition"
+                    >
+                      <Play className="w-3.5 h-3.5" />
+                      Concluir atendimento
+                    </button>
+                  )}
+
+                  {(b.status === 'PENDING_DEPOSIT' || b.status === 'CONFIRMED') && (
+                    <button
+                      type="button"
+                      onClick={() => void handleLifecycleAction(b.id, 'cancel')}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-surface hover:bg-[var(--status-noshow-bg)] text-[var(--status-noshow-text)] border border-[var(--status-noshow-border)] transition"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      Cancelar e ofertar vaga
+                    </button>
                   )}
                 </div>
               </div>
+            );
+          })}
 
-              {/* Action buttons for state machine */}
-              <div className="flex flex-wrap items-center gap-2 shrink-0">
-                {b.status === 'PENDING_DEPOSIT' && (
-                  <button
-                    onClick={() => void handleLifecycleAction(b.id, 'confirm-deposit')}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white"
-                  >
-                    <DollarSign className="w-3.5 h-3.5" />
-                    Confirmar Sinal
-                  </button>
-                )}
-
-                {b.status === 'CONFIRMED' && (
-                  <>
-                    <button
-                      onClick={() => void handleLifecycleAction(b.id, 'check-in')}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white"
-                    >
-                      <UserCheck className="w-3.5 h-3.5" />
-                      Check-in
-                    </button>
-                    <button
-                      onClick={() => void handleLifecycleAction(b.id, 'no-show')}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-600/80 hover:bg-amber-600 text-white"
-                    >
-                      <UserX className="w-3.5 h-3.5" />
-                      No-Show
-                    </button>
-                  </>
-                )}
-
-                {b.status === 'CHECKED_IN' && (
-                  <button
-                    onClick={() => void handleLifecycleAction(b.id, 'complete')}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white"
-                  >
-                    <Play className="w-3.5 h-3.5" />
-                    Concluir
-                  </button>
-                )}
-
-                {(b.status === 'PENDING_DEPOSIT' || b.status === 'CONFIRMED') && (
-                  <button
-                    onClick={() => void handleLifecycleAction(b.id, 'cancel')}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-600/90 hover:bg-rose-500 text-white"
-                  >
-                    <XCircle className="w-3.5 h-3.5" />
-                    Cancelar (Aciona Waitlist)
-                  </button>
-                )}
-              </div>
+          {filteredBookings.length === 0 && (
+            <div className="py-8 text-center text-xs text-ink-secondary">
+              Nenhuma reserva encontrada para os filtros selecionados.
             </div>
-          ))}
+          )}
         </div>
       </div>
+
+      {/* Drawer Compartilhado de Detalhes da Reserva */}
+      <BookingDetailsDrawer
+        open={Boolean(drawerBookingId)}
+        bookingId={drawerBookingId}
+        bookings={bookings}
+        procedures={procedures}
+        resourcesCatalog={resourcesCatalog}
+        auditLogs={auditLogs}
+        role={role}
+        token={token}
+        workspaceId={workspaceId}
+        onClose={() => setDrawerBookingId(null)}
+        onOptimisticStatusUpdate={onOptimisticStatusUpdate}
+        onRefresh={onRefresh}
+        onToast={(msg, type) => setFeedback({ type: type ?? 'success', text: msg })}
+        onCancelAndRecreate={(prefill) => {
+          setDrawerBookingId(null);
+          setSelectedProcedureId(prefill.procedureId);
+          setClientName(prefill.clientName);
+          setClientEmail(prefill.clientEmail);
+          setShowNewBookingPanel(true);
+        }}
+      />
     </div>
   );
 };

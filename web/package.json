@@ -6,21 +6,27 @@
   "scripts": {
     "dev": "vite --port 18174 --host 0.0.0.0",
     "build": "tsc -b && vite build",
-    "preview": "vite preview --port 18174"
+    "preview": "vite preview --port 18174",
+    "test": "vitest run --environment jsdom"
   },
   "dependencies": {
+    "@fontsource/instrument-sans": "^5.3.0",
     "lucide-react": "^0.460.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.3",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
     "autoprefixer": "^10.4.20",
+    "jsdom": "^29.1.1",
+    "playwright": "^1.65.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.15",
     "typescript": "^5.6.3",
-    "vite": "^5.4.11"
+    "vite": "^5.4.11",
+    "vitest": "^2.1.9"
   }
 }

@@ -2,14 +2,355 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :root {
+    /* Tema Claro (Padrão) — Calor Clínico */
+    --bg-canvas: #F3F5F4;
+    --bg-surface: #FFFFFF;
+    --bg-sunken: #E9EDEC;
+    --bg-elevated: #FFFFFF;
+    --border-subtle: #DCE2E0;
+    --border-strong: #C3CECA;
+    --text-primary: #14201F;
+    --text-secondary: #55625F;
+    --text-muted: #687673;
+    --accent-primary: #0F5E6B;
+    --accent-hover: #0B4A55;
+    --accent-tint: #E2F0F2;
+    --accent-tint-text: #0B4A55;
+    --accent-contrast: #FFFFFF;
+    --brand-subtle: #E2F0F2;
+    --btn-primary-bg: #0F5E6B;
+    --btn-primary-hover: #0B4A55;
+    --btn-primary-text: #FFFFFF;
+    --cleanup-border: #C3CECA;
+
+    /* Status das Reservas (única fonte de matiz cromático) */
+    --status-confirmed-bg: #E8F5EE;
+    --status-confirmed-border: #1F8A5B;
+    --status-confirmed-text: #145E3D;
+    --status-confirmed-dot: #1F8A5B;
+
+    --status-pending-bg: #FEF6E7;
+    --status-pending-border: #B7791F;
+    --status-pending-text: #7C4D0B;
+    --status-pending-dot: #B7791F;
+
+    --status-arrived-bg: #EBF2FE;
+    --status-arrived-border: #2F6FDE;
+    --status-arrived-text: #1E4DB7;
+    --status-arrived-dot: #2F6FDE;
+    --status-checkedin-bg: #EBF2FE;
+    --status-checkedin-border: #2F6FDE;
+    --status-checkedin-text: #1E4DB7;
+
+    --status-completed-bg: #EEF1F0;
+    --status-completed-border: #6B7775;
+    --status-completed-text: #3E4846;
+    --status-completed-dot: #6B7775;
+
+    --status-noshow-bg: #FFF1EC;
+    --status-noshow-border: #C2410C;
+    --status-noshow-text: #9A3412;
+    --status-noshow-dot: #C2410C;
+
+    --status-cancelled-bg: #F4F5F7;
+    --status-cancelled-border: #8A8F98;
+    --status-cancelled-text: #5E646E;
+    --status-cancelled-dot: #8A8F98;
+
+    --status-error-bg: #FDEDEC;
+    --status-error-border: #C0392B;
+    --status-error-text: #922B21;
+
+    /* Tipos de Recurso (Tons minerais neutros sem colisão com status) */
+    --res-specialist-bg: #E6EEF5;
+    --res-specialist-text: #2B445C;
+    --res-specialist-border: #C5D6E5;
+    --res-specialist-bar: #3B6286;
+
+    --res-room-bg: #F2ECE1;
+    --res-room-text: #5C472C;
+    --res-room-border: #DECFAF;
+    --res-room-bar: #8C6D46;
+
+    --res-equipment-bg: #ECEAF4;
+    --res-equipment-text: #3F3B5C;
+    --res-equipment-border: #D2CEE3;
+    --res-equipment-bar: #5E5985;
+
+    /* Hachura de Limpeza e Esterilização */
+    --cleanup-stripe-a: rgba(85, 98, 95, 0.16);
+    --cleanup-stripe-b: rgba(233, 237, 236, 0.65);
+
+    /* Linhas suaves da grade da Agenda (~12% hora, ~6% 30m/15m) */
+    --grid-hour-line: rgba(20, 32, 31, 0.12);
+    --grid-half-line: rgba(20, 32, 31, 0.065);
+    --grid-quarter-line: rgba(20, 32, 31, 0.04);
+    --grid-row-line: rgba(20, 32, 31, 0.09);
+  }
+
+  .dark {
+    /* Tema Escuro Redesenhado (Mineral Escuro, sem #000 e sem cinza puro) */
+    --bg-canvas: #0E1514;
+    --bg-surface: #151D1C;
+    --bg-sunken: #0B1110;
+    --bg-elevated: #1C2625;
+    --border-subtle: #2A3533;
+    --border-strong: #384744;
+    --text-primary: #E6ECEA;
+    --text-secondary: #9AA8A5;
+    --text-muted: #7A8A87;
+    --accent-primary: #4FB3C0;
+    --accent-hover: #66C2CE;
+    --accent-tint: #173135;
+    --accent-tint-text: #A5E3EB;
+    --accent-contrast: #FFFFFF;
+    --brand-subtle: #173135;
+    --btn-primary-bg: #0E6B78;
+    --btn-primary-hover: #138291;
+    --btn-primary-text: #FFFFFF;
+    --cleanup-border: #384744;
+
+    /* Status das Reservas (Tema Escuro) */
+    --status-confirmed-bg: #132E23;
+    --status-confirmed-border: #2A9163;
+    --status-confirmed-text: #8CE6BF;
+    --status-confirmed-dot: #34B37A;
+
+    --status-pending-bg: #2E2210;
+    --status-pending-border: #B7791F;
+    --status-pending-text: #F6C87A;
+    --status-pending-dot: #E0A33A;
+
+    --status-arrived-bg: #15243D;
+    --status-arrived-border: #3B7DED;
+    --status-arrived-text: #9CC0FF;
+    --status-arrived-dot: #639BFF;
+    --status-checkedin-bg: #15243D;
+    --status-checkedin-border: #3B7DED;
+    --status-checkedin-text: #9CC0FF;
+
+    --status-completed-bg: #1D2625;
+    --status-completed-border: #556360;
+    --status-completed-text: #B8C7C4;
+    --status-completed-dot: #8A9996;
+
+    --status-noshow-bg: #301810;
+    --status-noshow-border: #C2410C;
+    --status-noshow-text: #FDBA8C;
+    --status-noshow-dot: #F97316;
+
+    --status-cancelled-bg: #1A1D21;
+    --status-cancelled-border: #4B515C;
+    --status-cancelled-text: #9CA3AF;
+    --status-cancelled-dot: #7D8490;
+
+    --status-error-bg: #331515;
+    --status-error-border: #C0392B;
+    --status-error-text: #F5B7B1;
+
+    /* Tipos de Recurso (Tema Escuro — sem colisão com verde/esmeralda) */
+    --res-specialist-bg: #1C2A38;
+    --res-specialist-text: #B5C9DC;
+    --res-specialist-border: #2C4157;
+    --res-specialist-bar: #5A87B0;
+
+    --res-room-bg: #2B2318;
+    --res-room-text: #DFCBB0;
+    --res-room-border: #473927;
+    --res-room-bar: #B59163;
+
+    --res-equipment-bg: #232130;
+    --res-equipment-text: #CBC7E2;
+    --res-equipment-border: #3A3650;
+    --res-equipment-bar: #857FB0;
+
+    /* Hachura de Limpeza e Esterilização */
+    --cleanup-stripe-a: rgba(154, 168, 165, 0.20);
+    --cleanup-stripe-b: rgba(17, 24, 23, 0.65);
+
+    /* Linhas suaves da grade da Agenda no Tema Escuro (~12% hora, ~6% 30m/15m) */
+    --grid-hour-line: rgba(230, 236, 234, 0.11);
+    --grid-half-line: rgba(230, 236, 234, 0.06);
+    --grid-quarter-line: rgba(230, 236, 234, 0.035);
+    --grid-row-line: rgba(230, 236, 234, 0.08);
+  }
+
+  html {
+    font-family: "Instrument Sans", system-ui, -apple-system, sans-serif;
+    background-color: var(--bg-canvas);
+    color: var(--text-primary);
+    letter-spacing: 0em;
+    word-spacing: 0.09em;
+    font-kerning: normal;
+    font-feature-settings: "kern" 1, "liga" 1;
+  }
+
+  body {
+    background-color: var(--bg-canvas);
+    color: var(--text-primary);
+    font-size: 14px;
+    line-height: 1.5;
+    letter-spacing: 0em;
+    word-spacing: 0.09em;
+    margin: 0;
+    overflow-x: hidden;
+  }
+
+  button,
+  input,
+  select,
+  textarea,
+  svg text,
+  svg tspan {
+    letter-spacing: 0em;
+    word-spacing: 0.09em;
+  }
+
+  h1,
+  h2 {
+    letter-spacing: -0.01em;
+    word-spacing: 0.08em;
+  }
+
+  /* Foco visível acessível apenas em navegação real por teclado (exceto itens de menu que usam ring próprio) */
+  *:focus {
+    outline: none;
+  }
+
+  *:focus-visible:not([data-nav-item="true"]):not(input):not(select):not(textarea) {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+  }
+
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px var(--accent-tint);
+  }
+}
+
+/* Barra de rolagem estilizada fina em todo o app */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: 9999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-muted);
+}
+
 @layer utilities {
-  .bg-buffer-stripes {
+  .bg-cleanup-stripes {
     background-image: repeating-linear-gradient(
       -45deg,
-      rgba(245, 158, 11, 0.22),
-      rgba(245, 158, 11, 0.22) 6px,
-      rgba(245, 158, 11, 0.06) 6px,
-      rgba(245, 158, 11, 0.06) 12px
+      var(--cleanup-stripe-a),
+      var(--cleanup-stripe-a) 4px,
+      var(--cleanup-stripe-b) 4px,
+      var(--cleanup-stripe-b) 8px
     );
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Animação única da Matriz de Alocação no Login (respeita prefers-reduced-motion) */
+@keyframes matrixBlockSlideIn {
+  0% {
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes matrixConnectorGrow {
+  0% {
+    opacity: 0;
+    stroke-dashoffset: 180;
+  }
+  100% {
+    opacity: 1;
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes matrixCleanupReveal {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.matrix-anim-lane-1 {
+  animation: matrixBlockSlideIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
+}
+
+.matrix-anim-lane-2 {
+  animation: matrixBlockSlideIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.25s both;
+}
+
+.matrix-anim-lane-3 {
+  animation: matrixBlockSlideIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.4s both;
+}
+
+.matrix-anim-connector {
+  stroke-dasharray: 180;
+  animation: matrixConnectorGrow 0.6s ease-out 0.65s both;
+}
+
+.matrix-anim-cleanup {
+  animation: matrixCleanupReveal 0.45s ease-out 0.9s both;
+}
+
+.border-grid-hour {
+  border-color: var(--grid-hour-line) !important;
+}
+
+.border-grid-half {
+  border-color: var(--grid-half-line) !important;
+}
+
+.border-grid-quarter {
+  border-color: var(--grid-quarter-line) !important;
+}
+
+.border-grid-row {
+  border-color: var(--grid-row-line) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .matrix-anim-lane-1,
+  .matrix-anim-lane-2,
+  .matrix-anim-lane-3,
+  .matrix-anim-connector,
+  .matrix-anim-cleanup {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    stroke-dashoffset: 0 !important;
   }
 }

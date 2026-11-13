@@ -12,11 +12,19 @@ import {
   CheckCircle2,
   Clock,
   Flame,
+  History,
   PlusCircle,
-  RefreshCw,
   TimerOff,
   Zap,
 } from 'lucide-react';
+import {
+  cleanPersonName,
+  formatApiError,
+  formatDateBR,
+  formatTimeBR,
+  formatWaitlistPriority,
+  formatWaitlistStatus,
+} from './labels';
 
 interface Props {
   token: string;
@@ -28,11 +36,16 @@ interface Props {
 }
 
 const WAITLIST_BADGE: Record<WaitlistEntryDto['status'], string> = {
-  WAITING: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
-  OFFERED: 'bg-fuchsia-500/20 text-fuchsia-200 border-fuchsia-400 animate-pulse',
-  CLAIMED: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-  OFFER_EXPIRED: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-  CANCELLED: 'bg-slate-700/40 text-slate-400 border-slate-600/40',
+  WAITING:
+    'bg-[var(--brand-subtle)] text-brand border-brand/30',
+  OFFERED:
+    'bg-[var(--status-pending-bg)] text-[var(--status-pending-text)] border-[var(--status-pending-border)]',
+  CLAIMED:
+    'bg-[var(--status-confirmed-bg)] text-[var(--status-confirmed-text)] border-[var(--status-confirmed-border)]',
+  OFFER_EXPIRED:
+    'bg-[var(--status-noshow-bg)] text-[var(--status-noshow-text)] border-[var(--status-noshow-border)]',
+  CANCELLED:
+    'bg-sunken text-ink-secondary border-border-subtle',
 };
 
 export const WaitlistLiveRoom: React.FC<Props> = ({
@@ -49,6 +62,13 @@ export const WaitlistLiveRoom: React.FC<Props> = ({
   const [priority, setPriority] = useState<'STANDARD' | 'VIP'>('STANDARD');
   const [banner, setBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  const activeQueue = waitlist.filter(
+    (w) => w.status === 'WAITING' || w.status === 'OFFERED',
+  );
+  const historyEntries = waitlist.filter(
+    (w) => w.status !== 'WAITING' && w.status !== 'OFFERED',
+  );
+
   const handleJoinWaitlist = async (e: React.FormEvent) => {
     e.preventDefault();
     setBanner(null);
@@ -61,18 +81,21 @@ export const WaitlistLiveRoom: React.FC<Props> = ({
           procedureId: procedureId || procedures[0]?.id,
           clientName,
           clientEmail,
-          desiredStartAt: `${selectedDate}T08:00:00.000Z`,
-          desiredEndAt: `${selectedDate}T18:00:00.000Z`,
+          desiredStartAt: new Date(`${selectedDate}T08:00:00-03:00`).toISOString(),
+          desiredEndAt: new Date(`${selectedDate}T18:00:00-03:00`).toISOString(),
           priority,
         },
       });
       setBanner({
         type: 'success',
-        text: `${clientName} adicionado(a) à Smart Waitlist! Assim que um horário compatível vagar, uma SlotOffer será emitida.`,
+        text: `${cleanPersonName(clientName)} foi incluído(a) na lista de espera (${formatWaitlistPriority(priority)}). Assim que um horário compatível liberar, uma vaga reservada para oferta será enviada.`,
       });
       await onRefresh();
     } catch (err) {
-      const msg = err instanceof ApiHttpError ? `[HTTP ${err.status} ${err.code}] ${err.message}` : String(err);
+      const msg =
+        err instanceof ApiHttpError
+          ? formatApiError(err.message, err.code)
+          : formatApiError(String(err));
       setBanner({ type: 'error', text: msg });
     }
   };
@@ -90,11 +113,14 @@ export const WaitlistLiveRoom: React.FC<Props> = ({
       );
       setBanner({
         type: 'success',
-        text: `Oferta aceita! WaitlistEntry convertida atomicamente no Booking #${res.booking.id.slice(0, 8)} para ${res.booking.clientName}!`,
+        text: `Oferta confirmada! A vaga foi convertida em reserva confirmada para ${cleanPersonName(res.booking.clientName)}.`,
       });
       await onRefresh();
     } catch (err) {
-      const msg = err instanceof ApiHttpError ? `[HTTP ${err.status} ${err.code}] ${err.message}` : String(err);
+      const msg =
+        err instanceof ApiHttpError
+          ? formatApiError(err.message, err.code)
+          : formatApiError(String(err));
       setBanner({ type: 'error', text: msg });
     }
   };
@@ -109,11 +135,14 @@ export const WaitlistLiveRoom: React.FC<Props> = ({
       });
       setBanner({
         type: 'success',
-        text: `SlotOffer de ${name} marcada como OFFER_EXPIRED → Evento WaitlistOfferExpiredDomainEvent repassou a vaga em cascata para o #2 da fila!`,
+        text: `A oferta enviada para ${cleanPersonName(name)} foi encerrada e a vaga foi repassada automaticamente para o próximo paciente elegível da fila.`,
       });
       await onRefresh();
     } catch (err) {
-      const msg = err instanceof ApiHttpError ? `[HTTP ${err.status} ${err.code}] ${err.message}` : String(err);
+      const msg =
+        err instanceof ApiHttpError
+          ? formatApiError(err.message, err.code)
+          : formatApiError(String(err));
       setBanner({ type: 'error', text: msg });
     }
   };
@@ -124,44 +153,50 @@ export const WaitlistLiveRoom: React.FC<Props> = ({
         <div
           className={`p-4 rounded-xl border flex items-center justify-between ${
             banner.type === 'success'
-              ? 'bg-fuchsia-950/50 border-fuchsia-500/40 text-fuchsia-100'
-              : 'bg-rose-950/60 border-rose-500/40 text-rose-200'
+              ? 'bg-[var(--status-confirmed-bg)] border-[var(--status-confirmed-border)] text-[var(--status-confirmed-text)]'
+              : 'bg-[var(--status-noshow-bg)] border-[var(--status-noshow-border)] text-[var(--status-noshow-text)]'
           }`}
         >
           <div className="flex items-center gap-2.5 text-xs font-medium">
             {banner.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-fuchsia-400 shrink-0" />
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
             ) : (
-              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <AlertCircle className="w-4 h-4 shrink-0" />
             )}
             <span>{banner.text}</span>
           </div>
-          <button onClick={() => setBanner(null)} className="text-xs opacity-75 hover:opacity-100">
+          <button
+            type="button"
+            onClick={() => setBanner(null)}
+            className="text-xs opacity-75 hover:opacity-100"
+          >
             Fechar
           </button>
         </div>
       )}
 
-      {/* Waitlist Live Room Header & Enqueue Form */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-        <h2 className="text-base font-semibold text-white flex items-center gap-2">
-          <Zap className="w-5 h-5 text-fuchsia-400" />
-          Smart Waitlist Live Room — Ofertas Expiráveis (<code className="text-fuchsia-300">SlotOffer</code>) &amp;
-          Cascata Automática
-        </h2>
-        <p className="text-xs text-slate-400 mt-1">
-          Quando um agendamento é cancelado, <code className="text-fuchsia-300">OnBookingCancelledMatchWaitlistHandler</code>{' '}
-          reserva os recursos por 30 minutos para o 1º candidato compatível. Se a oferta expirar sem aceite,{' '}
-          <code className="text-fuchsia-300">OnWaitlistOfferExpiredCascadeHandler</code> transfere a oferta para o 2º da fila!
+      {/* Cabeçalho e Formulário de Inclusão na Lista de Espera */}
+      <div className="bg-surface border border-border-subtle rounded-xl p-5 shadow-xs">
+        <h1 className="text-lg font-semibold text-ink-primary flex items-center gap-2">
+          <Zap className="w-5 h-5 text-[var(--status-pending-text)]" />
+          Lista de espera
+        </h1>
+        <p className="text-xs text-ink-secondary mt-1">
+          Quando uma reserva é cancelada, o sistema bloqueia temporariamente os recursos por 30 minutos para o primeiro paciente compatível da fila. Se o prazo expirar sem confirmação, a vaga é repassada automaticamente ao próximo paciente.
         </p>
 
-        <form onSubmit={handleJoinWaitlist} className="mt-4 grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+        <form
+          onSubmit={handleJoinWaitlist}
+          className="mt-4 grid grid-cols-1 md:grid-cols-5 gap-3 items-end"
+        >
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Procedimento Desejado</label>
+            <label className="block text-xs text-ink-secondary mb-1">
+              Procedimento desejado
+            </label>
             <select
               value={procedureId}
               onChange={(e) => setProcedureId(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+              className="w-full bg-canvas border border-border-subtle rounded-lg px-3 py-2 text-xs text-ink-primary"
             >
               {procedures.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -171,128 +206,149 @@ export const WaitlistLiveRoom: React.FC<Props> = ({
             </select>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Nome do Paciente</label>
+            <label className="block text-xs text-ink-secondary mb-1">
+              Nome do paciente
+            </label>
             <input
               type="text"
               required
               value={clientName}
               onChange={(e) => setClientName(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+              className="w-full bg-canvas border border-border-subtle rounded-lg px-3 py-2 text-xs text-ink-primary"
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">E-mail</label>
+            <label className="block text-xs text-ink-secondary mb-1">
+              E-mail para notificação
+            </label>
             <input
               type="email"
               required
               value={clientEmail}
               onChange={(e) => setClientEmail(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+              className="w-full bg-canvas border border-border-subtle rounded-lg px-3 py-2 text-xs text-ink-primary"
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Prioridade (VIP requer ENTERPRISE)</label>
+            <label className="block text-xs text-ink-secondary mb-1">
+              Prioridade na fila
+            </label>
             <select
               value={priority}
-              onChange={(e) => setPriority(e.target.value as any)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+              onChange={(e) => setPriority(e.target.value as 'STANDARD' | 'VIP')}
+              className="w-full bg-canvas border border-border-subtle rounded-lg px-3 py-2 text-xs text-ink-primary"
             >
-              <option value="STANDARD">STANDARD (FIFO)</option>
-              <option value="VIP">VIP (Fura-fila Enterprise)</option>
+              <option value="STANDARD">Padrão (ordem de chegada)</option>
+              <option value="VIP">Prioridade alta</option>
             </select>
           </div>
           <button
             type="submit"
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-fuchsia-600 hover:bg-fuchsia-500 text-white"
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] text-white shadow-xs transition"
           >
             <PlusCircle className="w-4 h-4" />
-            Entrar na Smart Waitlist
+            Adicionar à fila
           </button>
         </form>
       </div>
 
-      {/* Live Queue Cards */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
-        <h3 className="text-sm font-semibold text-white">
-          Fila de Espera Ordenada (Prioridade VIP + FIFO <code>createdAt</code>)
-        </h3>
+      {/* Candidatos ativos na Lista de Espera */}
+      <div className="bg-surface border border-border-subtle rounded-xl p-5 shadow-xs">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-ink-primary">
+            Pacientes na fila (ordenados por prioridade e chegada)
+          </h2>
+          <span className="text-xs text-ink-secondary tabular-nums">
+            {activeQueue.length} aguardando na fila
+          </span>
+        </div>
 
-        {waitlist.length === 0 ? (
-          <div className="text-xs text-slate-400 py-6 text-center">
-            Nenhum candidato na Smart Waitlist neste Workspace.
+        {activeQueue.length === 0 ? (
+          <div className="text-center py-6 text-xs text-ink-secondary bg-canvas rounded-lg border border-border-subtle">
+            Nenhum paciente aguardando na fila ativa no momento.
           </div>
         ) : (
           <div className="space-y-3">
-            {waitlist.map((w, index) => {
-              const procName = procedures.find((p) => p.id === w.procedureId)?.name ?? w.procedureId;
+            {activeQueue.map((w, idx) => {
+              const proc = procedures.find((p) => p.id === w.procedureId);
+              const cleanName = cleanPersonName(w.clientName);
+              const offerStart =
+                w.activeOffer?.offeredStartAt ?? w.activeOffer?.slotStartAt ?? '';
+              const offerEnd =
+                w.activeOffer?.offeredEndAt ?? w.activeOffer?.slotEndAt ?? '';
               return (
                 <div
                   key={w.id}
                   className={`rounded-xl border p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
                     w.status === 'OFFERED'
-                      ? 'bg-fuchsia-950/30 border-fuchsia-500/60'
-                      : 'bg-slate-950/90 border-slate-800'
+                      ? 'bg-[var(--status-pending-bg)] border-[var(--status-pending-border)] shadow-sm'
+                      : 'bg-canvas border-border-subtle'
                   }`}
                 >
                   <div className="space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-mono text-slate-500">#{index + 1}</span>
-                      <span className="text-sm font-semibold text-white">{w.clientName}</span>
-                      <span className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded border ${WAITLIST_BADGE[w.status]}`}>
-                        {w.status}
+                      <span className="px-2 py-0.5 text-xs font-bold rounded bg-sunken text-ink-primary border border-border-subtle tabular-nums">
+                        {idx + 1}º
+                      </span>
+                      <span className="text-sm font-semibold text-ink-primary">
+                        {cleanName}
+                      </span>
+                      <span className="text-xs text-ink-secondary">
+                        ({w.clientEmail})
                       </span>
                       {w.priority === 'VIP' && (
-                        <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
-                          <Flame className="w-3 h-3" /> VIP
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-bold rounded bg-[var(--status-pending-bg)] text-[var(--status-pending-text)] border border-[var(--status-pending-border)]">
+                          <Flame className="w-3 h-3" /> {formatWaitlistPriority(w.priority)}
                         </span>
                       )}
-                    </div>
-
-                    <div className="text-xs text-slate-300">
-                      Procedimento: <strong>{procName}</strong> • Janela desejada:{' '}
-                      <span className="font-mono text-slate-400">
-                        {w.desiredStartAt.slice(0, 10)} ({w.desiredStartAt.slice(11, 16)}–{w.desiredEndAt.slice(11, 16)} UTC)
+                      <span
+                        className={`px-2 py-0.5 text-xs font-semibold rounded border ${WAITLIST_BADGE[w.status]}`}
+                      >
+                        {formatWaitlistStatus(w.status)}
                       </span>
                     </div>
 
-                    {w.activeOffer && (
-                      <div className="mt-2 bg-fuchsia-950/60 border border-fuchsia-500/40 rounded-lg p-2.5 text-xs text-fuchsia-200 space-y-1">
-                        <div className="font-semibold flex items-center gap-1.5">
-                          <Clock className="w-3.5 h-3.5 text-fuchsia-400" />
-                          Oferta Ativa Exclusiva (<code className="font-mono">SlotOffer</code>):{' '}
-                          {w.activeOffer.slotStartAt.slice(11, 16)} – {w.activeOffer.slotEndAt.slice(11, 16)} UTC
-                        </div>
-                        <div className="text-[11px] font-mono text-fuchsia-300">
-                          Expira em: {w.activeOffer.expiresAt.slice(11, 19)} UTC • Recursos pré-reservados:{' '}
-                          {w.activeOffer.reservedResourceIds.length}
-                        </div>
-                      </div>
-                    )}
+                    <div className="text-xs text-ink-secondary tabular-nums">
+                      Procedimento: <strong className="text-ink-primary">{proc?.name ?? 'Procedimento clínico'}</strong> · Janela desejada:{' '}
+                      <span className="text-brand font-medium">
+                        {formatDateBR(w.desiredStartAt)} · {formatTimeBR(w.desiredStartAt)}–{formatTimeBR(w.desiredEndAt)}
+                      </span>
+                    </div>
 
-                    {w.claimedBookingId && (
-                      <div className="text-xs text-emerald-400 font-mono">
-                        ✓ Convertida no Booking #{w.claimedBookingId.slice(0, 8)}
+                    {/* Exibe dados de oferta ativa SOMENTE quando o status é OFFERED */}
+                    {w.status === 'OFFERED' && w.activeOffer && (
+                      <div className="mt-2 p-2.5 rounded-lg bg-surface border border-[var(--status-pending-border)] text-xs text-ink-primary flex flex-wrap items-center gap-3 tabular-nums">
+                        <Clock className="w-4 h-4 text-[var(--status-pending-text)] shrink-0" />
+                        <span>
+                          <strong>Vaga reservada para oferta:</strong>{' '}
+                          {offerStart ? formatTimeBR(offerStart) : '--:--'}–
+                          {offerEnd ? formatTimeBR(offerEnd) : '--:--'} · Recursos bloqueados:{' '}
+                          {w.activeOffer.reservedResourceIds.length} · Expira às:{' '}
+                          {formatTimeBR(w.activeOffer.expiresAt)}
+                        </span>
                       </div>
                     )}
                   </div>
 
-                  {/* Interactive Simulation Buttons for OFFERED entries */}
+                  {/* Ações para vagas ofertadas */}
                   {w.status === 'OFFERED' && (
                     <div className="flex flex-wrap items-center gap-2.5 shrink-0">
                       <button
+                        type="button"
                         onClick={() => void handleClaimOffer(w.id)}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-[var(--status-confirmed-border)] hover:opacity-90 text-white shadow-xs transition"
                       >
                         <CheckCircle2 className="w-4 h-4" />
-                        Simular Aceite do Cliente (Claim)
+                        Confirmar aceite do paciente
                       </button>
 
                       <button
-                        onClick={() => void handleForceExpireCascade(w.id, w.clientName)}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white shadow"
+                        type="button"
+                        onClick={() => void handleForceExpireCascade(w.id, cleanName)}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-surface hover:bg-sunken text-ink-primary border border-border-strong shadow-xs transition"
                       >
-                        <TimerOff className="w-4 h-4" />
-                        Forçar Expiração da Oferta <ArrowRight className="w-3.5 h-3.5" /> Cascata p/ #2
+                        <TimerOff className="w-4 h-4 text-[var(--status-pending-text)]" />
+                        Encerrar oferta <ArrowRight className="w-3.5 h-3.5" /> passar ao próximo
                       </button>
                     </div>
                   )}
@@ -302,6 +358,60 @@ export const WaitlistLiveRoom: React.FC<Props> = ({
           </div>
         )}
       </div>
+
+      {/* Histórico de atendimentos convertidos ou encerrados da fila */}
+      {historyEntries.length > 0 && (
+        <div className="bg-surface border border-border-subtle rounded-xl p-5 shadow-xs">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-ink-primary flex items-center gap-2">
+              <History className="w-4 h-4 text-ink-secondary" />
+              Histórico da fila
+            </h2>
+            <span className="text-xs text-ink-secondary tabular-nums">
+              {historyEntries.length} atendimento(s) processado(s)
+            </span>
+          </div>
+
+          <div className="divide-y divide-border-subtle">
+            {historyEntries.map((w) => {
+              const proc = procedures.find((p) => p.id === w.procedureId);
+              const cleanName = cleanPersonName(w.clientName);
+              return (
+                <div
+                  key={w.id}
+                  className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                >
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-ink-primary">{cleanName}</span>
+                      <span className="text-ink-secondary">({w.clientEmail})</span>
+                      {w.priority === 'VIP' && (
+                        <span className="px-2 py-0.5 text-xs font-medium rounded bg-sunken text-ink-secondary border border-border-subtle">
+                          {formatWaitlistPriority(w.priority)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-ink-secondary tabular-nums">
+                      Procedimento: <strong className="text-ink-primary">{proc?.name ?? 'Procedimento clínico'}</strong> · Janela solicitada:{' '}
+                      {formatDateBR(w.desiredStartAt)} · {formatTimeBR(w.desiredStartAt)}–{formatTimeBR(w.desiredEndAt)}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span
+                      className={`px-2.5 py-1 text-xs font-semibold rounded border ${WAITLIST_BADGE[w.status]}`}
+                    >
+                      {w.status === 'CLAIMED'
+                        ? 'Convertida em reserva confirmada'
+                        : formatWaitlistStatus(w.status)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
