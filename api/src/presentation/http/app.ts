@@ -159,6 +159,20 @@ export function createApp(c: Container) {
   }
 
   app.use('/api', kit.router);
+
+  app.get('/', (_req, res) => {
+    if (enableDocs) {
+      return res.redirect('/api/docs');
+    }
+    return res.json({
+      service: 'SlotMatrix API',
+      status: 'online',
+      docs: '/api/docs',
+      health: '/api/health',
+      web: c.config.appPublicUrl ?? 'http://localhost:18174',
+    });
+  });
+
   app.use((_req, res) => res.status(404).json({ error: 'NOT_FOUND', message: 'Route not found' }));
   app.use(domainExceptionFilter);
   return app;
