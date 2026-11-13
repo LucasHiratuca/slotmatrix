@@ -1461,6 +1461,8 @@ export const App: React.FC = () => {
             >
               <ProceduresView
                 procedures={procedures}
+                canManageProcedures={canManageResources}
+                onRefresh={() => refreshWorkspaceData(false)}
                 onScheduleProcedure={(procedureId) => {
                   setPrefillProcedureId(procedureId);
                   setOpenNewBookingOnNavigate(true);
