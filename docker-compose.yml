@@ -52,6 +52,7 @@ services:
     build:
       context: ./api
       dockerfile: Dockerfile
+    image: lucashiratuca/slotmatrix-api:latest
     container_name: slotmatrix_api
     restart: unless-stopped
     security_opt:
@@ -102,6 +103,7 @@ services:
     build:
       context: ./api
       dockerfile: Dockerfile
+    image: lucashiratuca/slotmatrix-worker:latest
     container_name: slotmatrix_worker
     restart: unless-stopped
     security_opt:
@@ -133,6 +135,7 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
+    image: lucashiratuca/slotmatrix-web:latest
     container_name: slotmatrix_web
     restart: unless-stopped
     security_opt:
