@@ -17,7 +17,7 @@ export interface PasswordResetEmailPayload {
 }
 
 export interface IEmailGateway {
-  sendPasswordResetEmail(payload: PasswordResetEmailPayload): Promise<void>;
+  sendPasswordResetEmail(payload: PasswordResetEmailPayload): Promise<{ delivered: boolean; error?: string } | void>;
 }
 
 export interface AuditLogEntry {

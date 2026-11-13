@@ -144,6 +144,7 @@ describe('LoginView - Cadastro de Nova Clínica e Usuário', () => {
     const onForgotMock = vi.fn().mockResolvedValue({
       message: 'If an account exists with this email, a password reset link has been sent.',
       resetUrl: 'http://localhost:18174/reset-password?token=mock-token-xyz',
+      delivered: true,
     });
 
     render(<LoginView {...defaultProps} email="lucasussy69@gmail.com" onForgotPassword={onForgotMock} />);
@@ -153,7 +154,7 @@ describe('LoginView - Cadastro de Nova Clínica e Usuário', () => {
     await waitFor(() => {
       expect(onForgotMock).toHaveBeenCalledWith('lucasussy69@gmail.com');
       expect(screen.getByTestId('forgot-password-success-alert')).toBeDefined();
-      expect(screen.getByText(/E-mail de redefinição enviado para lucasussy69@gmail.com/i)).toBeDefined();
+      expect(screen.getByText(/E-mail enviado com sucesso para lucasussy69@gmail.com/i)).toBeDefined();
       expect(screen.getByTestId('test-reset-link')).toBeDefined();
       expect(screen.queryByText(/Por segurança clínica/i)).toBeNull();
     });

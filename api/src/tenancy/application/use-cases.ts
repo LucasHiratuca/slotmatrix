@@ -72,13 +72,14 @@ export class RequestPasswordResetUseCase {
     },
   ) {}
 
-  async execute(input: { email: string }): Promise<{ message: string; resetUrl?: string }> {
+  async execute(input: { email: string }): Promise<{ message: string; resetUrl?: string; delivered?: boolean; error?: string; note?: string }> {
     const email = input.email.trim().toLowerCase();
     const user = await this.d.users.findByEmail(email);
     // Anti-enumeration: Return generic success response even if email is not found
     if (!user) {
       return {
         message: 'If an account exists with this email, a password reset link has been sent.',
+        delivered: false,
       };
     }
 
@@ -92,7 +93,7 @@ export class RequestPasswordResetUseCase {
     const baseUrl = this.d.appBaseUrl ?? 'http://localhost:18174';
     const resetUrl = `${baseUrl}/reset-password?token=${resetToken}`;
 
-    await this.d.emails.sendPasswordResetEmail({
+    const emailResult = await this.d.emails.sendPasswordResetEmail({
       toEmail: user.email,
       userName: user.name,
       resetToken,
@@ -100,9 +101,19 @@ export class RequestPasswordResetUseCase {
       expiresAt,
     });
 
+    const isDelivered = emailResult && typeof emailResult === 'object' && 'delivered' in emailResult ? emailResult.delivered : false;
+    const smtpError = emailResult && typeof emailResult === 'object' && 'error' in emailResult ? emailResult.error : undefined;
+
     return {
       message: 'If an account exists with this email, a password reset link has been sent.',
       resetUrl,
+      delivered: isDelivered,
+      error: smtpError,
+      note: isDelivered
+        ? 'E-mail enviado com sucesso via SMTP para sua caixa de entrada.'
+        : smtpError
+        ? `Falha no envio SMTP: ${smtpError}.`
+        : 'Aviso: Servidor SMTP não configurado no .env. Configure SMTP_HOST/SMTP_USER/SMTP_PASS para envio real.',
     };
   }
 }

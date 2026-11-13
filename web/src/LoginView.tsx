@@ -27,7 +27,13 @@ interface LoginViewProps {
   onPasswordChange: (val: string) => void;
   onSubmit: (email: string, password: string) => Promise<void>;
   onRegister?: (data: RegisterData) => Promise<void>;
-  onForgotPassword?: (email: string) => Promise<{ message: string; resetUrl?: string } | void>;
+  onForgotPassword?: (email: string) => Promise<{
+    message: string;
+    resetUrl?: string;
+    delivered?: boolean;
+    error?: string;
+    note?: string;
+  } | void>;
   isLoggingIn: boolean;
   loginError: string | null;
   isDark: boolean;
@@ -58,7 +64,12 @@ export const LoginView: React.FC<LoginViewProps> = ({
   const [capsLockOn, setCapsLockOn] = useState(false);
   const [regCapsLockOn, setRegCapsLockOn] = useState(false);
   const [isSendingForgot, setIsSendingForgot] = useState(false);
-  const [forgotStatus, setForgotStatus] = useState<{ message: string; resetUrl?: string } | null>(null);
+  const [forgotStatus, setForgotStatus] = useState<{
+    message: string;
+    resetUrl?: string;
+    delivered?: boolean;
+    error?: string;
+  } | null>(null);
 
   // Campos do formulário de cadastro
   const [regName, setRegName] = useState('');
@@ -171,22 +182,43 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
     setIsSendingForgot(true);
     try {
+      let res: {
+        message: string;
+        resetUrl?: string;
+        delivered?: boolean;
+        error?: string;
+        note?: string;
+      } | void;
+
       if (onForgotPassword) {
-        const res = await onForgotPassword(em);
-        setForgotStatus({
-          message: `E-mail de redefinição enviado para ${em}. Confira sua caixa de entrada e os logs do servidor.`,
-          resetUrl: (res as any)?.resetUrl,
-        });
+        res = await onForgotPassword(em);
       } else {
-        const res = await apiRequest<{ message: string; resetUrl?: string }>('/auth/forgot-password', {
+        res = await apiRequest<{
+          message: string;
+          resetUrl?: string;
+          delivered?: boolean;
+          error?: string;
+          note?: string;
+        }>('/auth/forgot-password', {
           method: 'POST',
           body: { email: em },
         });
-        setForgotStatus({
-          message: `E-mail de redefinição enviado para ${em}. Confira sua caixa de entrada e os logs do servidor.`,
-          resetUrl: res?.resetUrl,
-        });
       }
+
+      const delivered = res?.delivered ?? false;
+      const error = res?.error;
+      const resetUrl = res?.resetUrl;
+
+      setForgotStatus({
+        message: delivered
+          ? `✓ E-mail enviado com sucesso para ${em}! Verifique sua caixa de entrada e spam.`
+          : error
+          ? `Falha na entrega via SMTP para ${em}: ${error}`
+          : `Solicitação registrada para ${em}. Servidor SMTP não configurado no .env.`,
+        resetUrl,
+        delivered,
+        error,
+      });
     } catch (err: any) {
       setClientError(err?.message || 'Falha ao solicitar redefinição de senha. Tente novamente.');
     } finally {
@@ -407,21 +439,42 @@ export const LoginView: React.FC<LoginViewProps> = ({
                     <div
                       role="status"
                       data-testid="forgot-password-success-alert"
-                      className="mt-2.5 p-3.5 rounded-xl border bg-[var(--status-confirmed-bg)] border-[var(--status-confirmed-border)] text-[var(--status-confirmed-text)] space-y-2 text-[13px]"
+                      className={`mt-2.5 p-3.5 rounded-xl border space-y-2 text-[13px] ${
+                        forgotStatus.delivered
+                          ? 'bg-[var(--status-confirmed-bg)] border-[var(--status-confirmed-border)] text-[var(--status-confirmed-text)]'
+                          : forgotStatus.error
+                          ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-900 text-rose-800 dark:text-rose-200'
+                          : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-900 text-amber-900 dark:text-amber-200'
+                      }`}
                     >
                       <div className="flex items-start gap-2">
-                        <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" strokeWidth={1.75} />
-                        <span className="font-medium">{forgotStatus.message}</span>
+                        {forgotStatus.delivered ? (
+                          <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" strokeWidth={1.75} />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" strokeWidth={1.75} />
+                        )}
+                        <div className="space-y-1">
+                          <span className="font-medium block">{forgotStatus.message}</span>
+                          {!forgotStatus.delivered && (
+                            <span className="text-[12px] opacity-90 block">
+                              {forgotStatus.error
+                                ? 'Verifique suas credenciais de e-mail no arquivo .env (SMTP_USER/SMTP_PASS).'
+                                : 'Configure SMTP_HOST, SMTP_USER e SMTP_PASS no arquivo .env para que os e-mails cheguem no Gmail.'}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       {forgotStatus.resetUrl && (
-                        <div className="pt-2 flex items-center justify-between border-t border-[var(--status-confirmed-border)]/50 text-[12px]">
-                          <span className="opacity-80">Ambiente de teste:</span>
+                        <div className="pt-2 flex items-center justify-between border-t border-current/20 text-[12px]">
+                          <span className="opacity-80">
+                            {forgotStatus.delivered ? 'Link gerado:' : 'Link direto de redefinição:'}
+                          </span>
                           <a
                             href={forgotStatus.resetUrl}
                             data-testid="test-reset-link"
                             className="font-semibold underline hover:opacity-80"
                           >
-                            Abrir tela de redefinição →
+                            Redefinir senha agora →
                           </a>
                         </div>
                       )}

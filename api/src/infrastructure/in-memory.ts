@@ -296,8 +296,9 @@ export class RecordingNotificationGateway implements INotificationGateway {
 
 export class InMemoryEmailGateway implements IEmailGateway {
   sentEmails: PasswordResetEmailPayload[] = [];
-  async sendPasswordResetEmail(payload: PasswordResetEmailPayload): Promise<void> {
+  async sendPasswordResetEmail(payload: PasswordResetEmailPayload): Promise<{ delivered: boolean }> {
     this.sentEmails.push({ ...payload });
+    return { delivered: true };
   }
 }
 

@@ -392,7 +392,13 @@ export const App: React.FC = () => {
   };
 
   const handleForgotPassword = async (forgotEmail: string) => {
-    return apiRequest<{ message: string; resetUrl?: string }>('/auth/forgot-password', {
+    return apiRequest<{
+      message: string;
+      resetUrl?: string;
+      delivered?: boolean;
+      error?: string;
+      note?: string;
+    }>('/auth/forgot-password', {
       method: 'POST',
       body: { email: forgotEmail },
     });

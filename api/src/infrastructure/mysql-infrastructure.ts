@@ -110,25 +110,71 @@ class RedisBackedRevocationStore implements TokenRevocationStore {
 
 export class ConsoleEmailGateway implements IEmailGateway {
   private transporter: Transporter | null = null;
+  private isConfigured = false;
 
   constructor() {
-    const host = process.env.SMTP_HOST;
-    const user = process.env.SMTP_USER;
-    const pass = process.env.SMTP_PASS;
-    const port = Number(process.env.SMTP_PORT ?? 587);
-
-    if (host && user && pass) {
-      this.transporter = nodemailer.createTransport({
-        host,
-        port,
-        secure: port === 465,
-        auth: { user, pass },
-      });
-      console.log(`[EmailGateway] SMTP configurado com sucesso para ${host}:${port} (${user})`);
-    }
+    this.getTransporter();
   }
 
-  async sendPasswordResetEmail(payload: PasswordResetEmailPayload): Promise<void> {
+  private getTransporter(): Transporter | null {
+    if (this.transporter) return this.transporter;
+
+    const service = process.env.SMTP_SERVICE?.trim();
+    const host = process.env.SMTP_HOST?.trim();
+    const user = process.env.SMTP_USER?.trim();
+    let pass = process.env.SMTP_PASS?.trim();
+    const port = Number(process.env.SMTP_PORT ?? (service === 'gmail' || host === 'smtp.gmail.com' ? 465 : 587));
+    const secure = process.env.SMTP_SECURE !== undefined
+      ? process.env.SMTP_SECURE === 'true'
+      : port === 465;
+
+    // Se for Gmail e a senha contiver espaços (ex: "abcd efgh ijkl mnop"), remove espaços
+    if ((host?.includes('gmail') || service?.toLowerCase() === 'gmail') && pass) {
+      pass = pass.replace(/\s+/g, '');
+    }
+
+    if (service && user && pass) {
+      try {
+        this.transporter = nodemailer.createTransport({
+          service,
+          auth: { user, pass },
+          connectionTimeout: 10000,
+          greetingTimeout: 10000,
+          socketTimeout: 15000,
+        });
+        this.isConfigured = true;
+        console.log(`[EmailGateway] SMTP configurado com sucesso via serviço '${service}' (${user})`);
+        return this.transporter;
+      } catch (err: any) {
+        console.error(`[EmailGateway] Falha ao criar transporter SMTP (${service}):`, err?.message ?? err);
+        return null;
+      }
+    }
+
+    if (host && user && pass) {
+      try {
+        this.transporter = nodemailer.createTransport({
+          host,
+          port,
+          secure,
+          auth: { user, pass },
+          connectionTimeout: 10000,
+          greetingTimeout: 10000,
+          socketTimeout: 15000,
+        });
+        this.isConfigured = true;
+        console.log(`[EmailGateway] SMTP configurado com sucesso para ${host}:${port} (${user}, secure=${secure})`);
+        return this.transporter;
+      } catch (err: any) {
+        console.error(`[EmailGateway] Falha ao criar transporter SMTP (${host}:${port}):`, err?.message ?? err);
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  async sendPasswordResetEmail(payload: PasswordResetEmailPayload): Promise<{ delivered: boolean; error?: string }> {
     console.log('\n================================================================');
     console.log('📧 [SLOTMATRIX EMAIL SERVICE] E-MAIL DE REDEFINIÇÃO DE SENHA');
     console.log(`Para: ${payload.toEmail} (${payload.userName})`);
@@ -138,36 +184,53 @@ export class ConsoleEmailGateway implements IEmailGateway {
     console.log(`Expira em: ${payload.expiresAt.toISOString()}`);
     console.log('================================================================\n');
 
-    if (this.transporter) {
+    const transporter = this.getTransporter();
+
+    if (transporter) {
       try {
-        const from = process.env.SMTP_FROM ?? process.env.SMTP_USER ?? 'suporte@slotmatrix.com';
-        await this.transporter.sendMail({
-          from: `"SlotMatrix" <${from}>`,
+        const from = process.env.SMTP_FROM?.trim() || process.env.SMTP_USER?.trim() || 'suporte@slotmatrix.com';
+        const fromHeader = from.includes('<') ? from : `"SlotMatrix" <${from}>`;
+
+        const info = await transporter.sendMail({
+          from: fromHeader,
           to: payload.toEmail,
           subject: 'SlotMatrix · Redefinição de Senha',
           text: `Olá ${payload.userName},\n\nRecebemos uma solicitação para redefinir a sua senha no SlotMatrix.\n\nClique no link abaixo para criar uma nova senha:\n${payload.resetUrl}\n\nEste link expira em 1 hora.\n\nSe você não solicitou esta alteração, ignore este e-mail.`,
           html: `
-            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b; background-color: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0;">
-              <h2 style="color: #0f172a; margin-top: 0;">Redefinição de Senha · SlotMatrix</h2>
-              <p>Olá <strong>${payload.userName}</strong>,</p>
-              <p>Recebemos uma solicitação para redefinir a senha de acesso da sua conta.</p>
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 32px 24px; color: #1e293b; background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+              <div style="margin-bottom: 24px;">
+                <span style="font-size: 20px; font-weight: 700; color: #0284c7; letter-spacing: -0.025em;">SlotMatrix</span>
+                <span style="font-size: 13px; color: #64748b; margin-left: 8px;">· Coordenação Clínica</span>
+              </div>
+              <h2 style="color: #0f172a; margin-top: 0; font-size: 18px; font-weight: 600;">Redefinição de Senha</h2>
+              <p style="font-size: 14px; line-height: 1.6; color: #334155;">Olá <strong>${payload.userName}</strong>,</p>
+              <p style="font-size: 14px; line-height: 1.6; color: #334155;">Recebemos uma solicitação para redefinir a senha de acesso da sua conta.</p>
               <div style="margin: 28px 0;">
-                <a href="${payload.resetUrl}" style="background-color: #0284c7; color: #ffffff; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block;">
+                <a href="${payload.resetUrl}" style="background-color: #0284c7; color: #ffffff; padding: 13px 26px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px; display: inline-block;">
                   Redefinir Minha Senha
                 </a>
               </div>
               <p style="font-size: 13px; color: #64748b; margin-bottom: 4px;">Ou copie e cole o link abaixo no seu navegador:</p>
-              <p style="font-size: 13px; color: #0284c7; word-break: break-all;">${payload.resetUrl}</p>
-              <hr style="border: none; border-top: 1px solid #cbd5e1; margin: 24px 0;" />
-              <p style="font-size: 12px; color: #94a3b8; margin-bottom: 0;">Este link é válido por 1 hora. Se você não solicitou a alteração, nenhuma ação é necessária.</p>
+              <p style="font-size: 12px; color: #0284c7; word-break: break-all; margin-top: 0;">${payload.resetUrl}</p>
+              <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 28px 0 20px;" />
+              <p style="font-size: 12px; color: #94a3b8; margin-bottom: 0; line-height: 1.5;">Este link expira em 1 hora. Se você não solicitou a alteração, ignore este e-mail com segurança.</p>
             </div>
           `,
         });
-        console.log(`[EmailGateway] ✅ E-mail enviado com sucesso via SMTP para ${payload.toEmail}`);
+
+        console.log(`[EmailGateway] ✅ E-mail enviado com sucesso via SMTP para ${payload.toEmail} (messageId: ${info.messageId})`);
+        return { delivered: true };
       } catch (err: any) {
-        console.error(`[EmailGateway] ❌ Erro ao enviar e-mail via SMTP para ${payload.toEmail}:`, err?.message ?? err);
+        const errorMsg = err?.message ?? String(err);
+        console.error(`[EmailGateway] ❌ Erro ao enviar e-mail via SMTP para ${payload.toEmail}:`, errorMsg);
+        return { delivered: false, error: errorMsg };
       }
     }
+
+    return {
+      delivered: false,
+      error: 'Servidor SMTP não configurado no .env (configure SMTP_HOST, SMTP_USER e SMTP_PASS).',
+    };
   }
 }
 
