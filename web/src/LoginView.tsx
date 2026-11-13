@@ -11,6 +11,7 @@ import {
   Sun,
 } from 'lucide-react';
 import { Avatar } from './ui/Primitives';
+import { apiRequest } from './api';
 
 export interface RegisterData {
   name: string;
@@ -26,6 +27,7 @@ interface LoginViewProps {
   onPasswordChange: (val: string) => void;
   onSubmit: (email: string, password: string) => Promise<void>;
   onRegister?: (data: RegisterData) => Promise<void>;
+  onForgotPassword?: (email: string) => Promise<{ message: string; resetUrl?: string } | void>;
   isLoggingIn: boolean;
   loginError: string | null;
   isDark: boolean;
@@ -40,6 +42,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
   onPasswordChange,
   onSubmit,
   onRegister,
+  onForgotPassword,
   isLoggingIn,
   loginError,
   isDark,
@@ -54,7 +57,8 @@ export const LoginView: React.FC<LoginViewProps> = ({
   const [showRegPassword, setShowRegPassword] = useState(false);
   const [capsLockOn, setCapsLockOn] = useState(false);
   const [regCapsLockOn, setRegCapsLockOn] = useState(false);
-  const [showForgotHelp, setShowForgotHelp] = useState(false);
+  const [isSendingForgot, setIsSendingForgot] = useState(false);
+  const [forgotStatus, setForgotStatus] = useState<{ message: string; resetUrl?: string } | null>(null);
 
   // Campos do formulário de cadastro
   const [regName, setRegName] = useState('');
@@ -152,6 +156,41 @@ export const LoginView: React.FC<LoginViewProps> = ({
       } catch (err: any) {
         setClientError(formatHumanLoginError(err?.message || 'Falha ao realizar cadastro. Tente novamente.'));
       }
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    setClientError(null);
+    setForgotStatus(null);
+    const em = email.trim();
+    if (!em || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+      setClientError('Informe seu e-mail corporativo no campo acima para receber o link de redefinição de senha.');
+      emailInputRef.current?.focus();
+      return;
+    }
+
+    setIsSendingForgot(true);
+    try {
+      if (onForgotPassword) {
+        const res = await onForgotPassword(em);
+        setForgotStatus({
+          message: `E-mail de redefinição enviado para ${em}. Confira sua caixa de entrada e os logs do servidor.`,
+          resetUrl: (res as any)?.resetUrl,
+        });
+      } else {
+        const res = await apiRequest<{ message: string; resetUrl?: string }>('/auth/forgot-password', {
+          method: 'POST',
+          body: { email: em },
+        });
+        setForgotStatus({
+          message: `E-mail de redefinição enviado para ${em}. Confira sua caixa de entrada e os logs do servidor.`,
+          resetUrl: res?.resetUrl,
+        });
+      }
+    } catch (err: any) {
+      setClientError(err?.message || 'Falha ao solicitar redefinição de senha. Tente novamente.');
+    } finally {
+      setIsSendingForgot(false);
     }
   };
 
@@ -311,10 +350,12 @@ export const LoginView: React.FC<LoginViewProps> = ({
                     </label>
                     <button
                       type="button"
-                      onClick={() => setShowForgotHelp((prev) => !prev)}
-                      className="text-[13px] text-brand hover:underline font-medium"
+                      disabled={isSendingForgot || isLoggingIn}
+                      data-testid="forgot-password-button"
+                      onClick={() => void handleForgotPassword()}
+                      className="text-[13px] text-brand hover:underline font-medium cursor-pointer disabled:opacity-50"
                     >
-                      Esqueceu a senha?
+                      {isSendingForgot ? 'Enviando link...' : 'Esqueceu a senha?'}
                     </button>
                   </div>
 
@@ -362,9 +403,28 @@ export const LoginView: React.FC<LoginViewProps> = ({
                     </div>
                   )}
 
-                  {showForgotHelp && (
-                    <div className="mt-2 p-3 rounded-lg bg-sunken border border-border-subtle text-[13px] text-ink-secondary leading-relaxed">
-                      Por segurança clínica, a redefinição de senha é feita pela administração da sua unidade (Proprietária ou Administração).
+                  {forgotStatus && (
+                    <div
+                      role="status"
+                      data-testid="forgot-password-success-alert"
+                      className="mt-2.5 p-3.5 rounded-xl border bg-[var(--status-confirmed-bg)] border-[var(--status-confirmed-border)] text-[var(--status-confirmed-text)] space-y-2 text-[13px]"
+                    >
+                      <div className="flex items-start gap-2">
+                        <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" strokeWidth={1.75} />
+                        <span className="font-medium">{forgotStatus.message}</span>
+                      </div>
+                      {forgotStatus.resetUrl && (
+                        <div className="pt-2 flex items-center justify-between border-t border-[var(--status-confirmed-border)]/50 text-[12px]">
+                          <span className="opacity-80">Ambiente de teste:</span>
+                          <a
+                            href={forgotStatus.resetUrl}
+                            data-testid="test-reset-link"
+                            className="font-semibold underline hover:opacity-80"
+                          >
+                            Abrir tela de redefinição →
+                          </a>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

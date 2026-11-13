@@ -26,6 +26,7 @@ import { ResourcesView } from './ResourcesView';
 import { ProceduresView } from './ProceduresView';
 import { AuditView, AuditEntryItem } from './AuditView';
 import { LoginView } from './LoginView';
+import { ResetPasswordView } from './ResetPasswordView';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ProfileModal } from './ProfileModal';
 import { Avatar } from './ui/Primitives';
@@ -89,6 +90,12 @@ export const App: React.FC = () => {
         ? (initialPreviewMatch[1].toLowerCase() as AgendaPreviewVariant)
         : null,
     );
+
+  const initialResetToken =
+    window.location.pathname.startsWith('/reset-password')
+      ? new URLSearchParams(window.location.search).get('token')
+      : null;
+  const [resetPasswordToken, setResetPasswordToken] = useState<string | null>(initialResetToken);
 
   // Tema Claro como padrão ("Calor Clínico"), persistido em localStorage
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -384,6 +391,13 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleForgotPassword = async (forgotEmail: string) => {
+    return apiRequest<{ message: string; resetUrl?: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: { email: forgotEmail },
+    });
+  };
+
   const refreshWorkspaceData = useCallback(
     async (silent = false) => {
       if (!authenticated) return;
@@ -634,6 +648,25 @@ export const App: React.FC = () => {
     );
   }
 
+  // Etapa 1.5: Tela de Redefinição de Senha
+  if (resetPasswordToken) {
+    return (
+      <ResetPasswordView
+        token={resetPasswordToken}
+        onSuccess={() => {
+          setResetPasswordToken(null);
+          window.history.replaceState({}, '', '/');
+        }}
+        onCancel={() => {
+          setResetPasswordToken(null);
+          window.history.replaceState({}, '', '/');
+        }}
+        isDark={theme === 'dark'}
+        onToggleTheme={toggleTheme}
+      />
+    );
+  }
+
   // Etapa 2: Tela de Login Split 44/56 ("Calor Clínico")
   if (!authenticated && !(isCheckingSession && isLoadingWorkspace)) {
     return (
@@ -644,6 +677,7 @@ export const App: React.FC = () => {
         onPasswordChange={setPassword}
         onSubmit={handleLogin}
         onRegister={handleRegister}
+        onForgotPassword={handleForgotPassword}
         isLoggingIn={isLoggingIn}
         loginError={loginError}
         isDark={theme === 'dark'}

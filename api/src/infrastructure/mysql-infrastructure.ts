@@ -1,4 +1,5 @@
 import IORedis from 'ioredis';
+import nodemailer, { type Transporter } from 'nodemailer';
 import { Infrastructure } from '../composition-root';
 import { systemClock } from '../shared/application/ports';
 import {
@@ -108,10 +109,65 @@ class RedisBackedRevocationStore implements TokenRevocationStore {
 }
 
 export class ConsoleEmailGateway implements IEmailGateway {
+  private transporter: Transporter | null = null;
+
+  constructor() {
+    const host = process.env.SMTP_HOST;
+    const user = process.env.SMTP_USER;
+    const pass = process.env.SMTP_PASS;
+    const port = Number(process.env.SMTP_PORT ?? 587);
+
+    if (host && user && pass) {
+      this.transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465,
+        auth: { user, pass },
+      });
+      console.log(`[EmailGateway] SMTP configurado com sucesso para ${host}:${port} (${user})`);
+    }
+  }
+
   async sendPasswordResetEmail(payload: PasswordResetEmailPayload): Promise<void> {
-    console.log(
-      `[EmailGateway] Password reset email sent to ${payload.toEmail} (${payload.userName}). Reset link: ${payload.resetUrl}`,
-    );
+    console.log('\n================================================================');
+    console.log('📧 [SLOTMATRIX EMAIL SERVICE] E-MAIL DE REDEFINIÇÃO DE SENHA');
+    console.log(`Para: ${payload.toEmail} (${payload.userName})`);
+    console.log(`Assunto: SlotMatrix · Redefinição de Senha`);
+    console.log(`Link direto de redefinição: ${payload.resetUrl}`);
+    console.log(`Token: ${payload.resetToken}`);
+    console.log(`Expira em: ${payload.expiresAt.toISOString()}`);
+    console.log('================================================================\n');
+
+    if (this.transporter) {
+      try {
+        const from = process.env.SMTP_FROM ?? process.env.SMTP_USER ?? 'suporte@slotmatrix.com';
+        await this.transporter.sendMail({
+          from: `"SlotMatrix" <${from}>`,
+          to: payload.toEmail,
+          subject: 'SlotMatrix · Redefinição de Senha',
+          text: `Olá ${payload.userName},\n\nRecebemos uma solicitação para redefinir a sua senha no SlotMatrix.\n\nClique no link abaixo para criar uma nova senha:\n${payload.resetUrl}\n\nEste link expira em 1 hora.\n\nSe você não solicitou esta alteração, ignore este e-mail.`,
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b; background-color: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0;">
+              <h2 style="color: #0f172a; margin-top: 0;">Redefinição de Senha · SlotMatrix</h2>
+              <p>Olá <strong>${payload.userName}</strong>,</p>
+              <p>Recebemos uma solicitação para redefinir a senha de acesso da sua conta.</p>
+              <div style="margin: 28px 0;">
+                <a href="${payload.resetUrl}" style="background-color: #0284c7; color: #ffffff; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block;">
+                  Redefinir Minha Senha
+                </a>
+              </div>
+              <p style="font-size: 13px; color: #64748b; margin-bottom: 4px;">Ou copie e cole o link abaixo no seu navegador:</p>
+              <p style="font-size: 13px; color: #0284c7; word-break: break-all;">${payload.resetUrl}</p>
+              <hr style="border: none; border-top: 1px solid #cbd5e1; margin: 24px 0;" />
+              <p style="font-size: 12px; color: #94a3b8; margin-bottom: 0;">Este link é válido por 1 hora. Se você não solicitou a alteração, nenhuma ação é necessária.</p>
+            </div>
+          `,
+        });
+        console.log(`[EmailGateway] ✅ E-mail enviado com sucesso via SMTP para ${payload.toEmail}`);
+      } catch (err: any) {
+        console.error(`[EmailGateway] ❌ Erro ao enviar e-mail via SMTP para ${payload.toEmail}:`, err?.message ?? err);
+      }
+    }
   }
 }
 

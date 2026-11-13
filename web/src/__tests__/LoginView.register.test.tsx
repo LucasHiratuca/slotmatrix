@@ -130,4 +130,32 @@ describe('LoginView - Cadastro de Nova Clínica e Usuário', () => {
     expect(screen.getByRole('heading', { name: /Bem-vindo de volta/i })).toBeDefined();
     expect(screen.getByRole('button', { name: /^Entrar$/i })).toBeDefined();
   });
+
+  it('7. Exibe erro ao clicar em "Esqueceu a senha?" sem ter preenchido o e-mail corporativo', async () => {
+    render(<LoginView {...defaultProps} email="" />);
+
+    fireEvent.click(screen.getByTestId('forgot-password-button'));
+
+    expect(screen.getByText(/Informe seu e-mail corporativo no campo acima/i)).toBeDefined();
+    expect(screen.queryByText(/Por segurança clínica/i)).toBeNull();
+  });
+
+  it('8. Envia e-mail de redefinição de senha ao clicar em "Esqueceu a senha?" com e-mail preenchido', async () => {
+    const onForgotMock = vi.fn().mockResolvedValue({
+      message: 'If an account exists with this email, a password reset link has been sent.',
+      resetUrl: 'http://localhost:18174/reset-password?token=mock-token-xyz',
+    });
+
+    render(<LoginView {...defaultProps} email="lucasussy69@gmail.com" onForgotPassword={onForgotMock} />);
+
+    fireEvent.click(screen.getByTestId('forgot-password-button'));
+
+    await waitFor(() => {
+      expect(onForgotMock).toHaveBeenCalledWith('lucasussy69@gmail.com');
+      expect(screen.getByTestId('forgot-password-success-alert')).toBeDefined();
+      expect(screen.getByText(/E-mail de redefinição enviado para lucasussy69@gmail.com/i)).toBeDefined();
+      expect(screen.getByTestId('test-reset-link')).toBeDefined();
+      expect(screen.queryByText(/Por segurança clínica/i)).toBeNull();
+    });
+  });
 });

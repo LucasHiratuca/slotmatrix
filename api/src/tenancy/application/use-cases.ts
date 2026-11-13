@@ -72,12 +72,14 @@ export class RequestPasswordResetUseCase {
     },
   ) {}
 
-  async execute(input: { email: string }): Promise<{ message: string }> {
+  async execute(input: { email: string }): Promise<{ message: string; resetUrl?: string }> {
     const email = input.email.trim().toLowerCase();
     const user = await this.d.users.findByEmail(email);
     // Anti-enumeration: Return generic success response even if email is not found
     if (!user) {
-      return { message: 'If an account exists with this email, a password reset link has been sent.' };
+      return {
+        message: 'If an account exists with this email, a password reset link has been sent.',
+      };
     }
 
     const resetToken = randomBytes(32).toString('hex');
@@ -98,7 +100,10 @@ export class RequestPasswordResetUseCase {
       expiresAt,
     });
 
-    return { message: 'If an account exists with this email, a password reset link has been sent.' };
+    return {
+      message: 'If an account exists with this email, a password reset link has been sent.',
+      resetUrl,
+    };
   }
 }
 
