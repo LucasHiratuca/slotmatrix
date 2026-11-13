@@ -40,11 +40,12 @@ export async function collectActiveHolds(
   tenantId: string,
   searchWindow: TimeSlot,
   now: Date,
-  opts?: { forUpdate?: boolean; excludeWaitlistEntryId?: string; procedure?: { requirements: readonly { category: string; turnaround: { prepMinutes: number; cleanupMinutes: number } }[] } },
+  opts?: { forUpdate?: boolean; excludeWaitlistEntryId?: string; excludeBookingId?: string; procedure?: { requirements: readonly { category: string; turnaround: { prepMinutes: number; cleanupMinutes: number } }[] } },
 ): Promise<ExistingResourceHold[]> {
   const expanded = searchWindow.expandWithBuffers(240, 240);
   const bookingHolds = await d.bookings.findActiveResourceHoldsInWindow(tenantId, expanded, now, {
     forUpdate: opts?.forUpdate,
+    excludeBookingId: opts?.excludeBookingId,
   });
   const activeOffers = await d.waitlist.listActiveOffersByTenant(tenantId, now, {
     forUpdate: opts?.forUpdate,
@@ -206,6 +207,55 @@ export class RecordBookingNoShowUseCase {
     const b = await requireBooking(this.d, input.tenantId, input.bookingId);
     b.markAsNoShow(this.d.clock.now(), input.actorId);
     return persistBooking(this.d, b);
+  }
+}
+
+export class RescheduleBookingUseCase {
+  constructor(private readonly d: SchedulingDeps) {}
+
+  async execute(input: {
+    tenantId: string;
+    bookingId: string;
+    startAt: Date;
+    preferredResourceIds?: string[];
+  }): Promise<Booking> {
+    const now = this.d.clock.now();
+    const booking = await requireBooking(this.d, input.tenantId, input.bookingId);
+    const procedure = await this.d.procedures.findById(input.tenantId, booking.procedureId.value);
+    if (!procedure) throw new NotFoundError('ServiceProcedure not found');
+
+    const newServiceSlot = TimeSlot.fromDuration(input.startAt, procedure.durationMinutes);
+
+    return this.d.uow.run(async () => {
+      const candidateResources = await this.d.resources.listByTenant(input.tenantId, {
+        onlyActive: true,
+        forUpdate: true,
+      });
+
+      const existingHolds = await collectActiveHolds(this.d, input.tenantId, newServiceSlot, now, {
+        forUpdate: true,
+        excludeBookingId: booking.id.value,
+      });
+
+      const allocResult = availabilitySvc.allocateResourcesForSlot({
+        procedure,
+        serviceSlot: newServiceSlot,
+        candidateResources,
+        existingHolds,
+        preferredResourceIds: input.preferredResourceIds,
+      });
+
+      if (!allocResult.ok) {
+        throw new ResourceAllocationConflictError(allocResult.reason);
+      }
+
+      booking.reschedule(newServiceSlot, allocResult.allocations, now);
+      await this.d.bookings.save(booking);
+      if (this.d.dispatcher) {
+        await this.d.dispatcher.dispatch(booking.pullDomainEvents());
+      }
+      return booking;
+    });
   }
 }
 

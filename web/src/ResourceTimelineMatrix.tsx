@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ApiHttpError,
+  apiRequest,
   BookableResourceDto,
   BookingDto,
   KpiSummaryDto,
@@ -13,9 +15,11 @@ import {
   TimelineBookingFallback,
   WaitlistOfferHoldSelection,
 } from './BookingDetailsDrawer';
+import { RescheduleModal } from './RescheduleModal';
 import {
   addDaysToIsoDate,
   cleanPersonName,
+  formatApiError,
   formatBookingStatus,
   formatCapability,
   formatDateBR,
@@ -29,6 +33,7 @@ import {
 } from './labels';
 import {
   AlertCircle,
+  AlertTriangle,
   Box,
   Calendar,
   CalendarPlus,
@@ -38,12 +43,15 @@ import {
   ChevronRight,
   Clock,
   Link2,
+  Loader2,
   Minus,
+  MoreVertical,
   Plus,
   RefreshCw,
   Rows3,
   Stethoscope,
   UserCheck,
+  UserX,
   Wrench,
   X,
 } from 'lucide-react';
@@ -255,6 +263,101 @@ export const ResourceTimelineMatrix: React.FC<Props> = ({
   const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
   }, []);
+
+  // Estados para Ações Rápidas Diretas e Menu de Contexto na Agenda
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    bookingId: string;
+    clientName: string;
+    procedureName: string;
+    bookingStatus: string;
+    serviceStartAt: string;
+    serviceEndAt: string;
+    resourceId: string;
+  } | null>(null);
+
+  const [rescheduleTargetBooking, setRescheduleTargetBooking] = useState<{
+    id: string;
+    clientName: string;
+    procedureName: string;
+    procedureId?: string;
+    serviceStartAt: string;
+    serviceEndAt: string;
+  } | null>(null);
+
+  const [noShowConfirmTarget, setNoShowConfirmTarget] = useState<{
+    bookingId: string;
+    clientName: string;
+  } | null>(null);
+
+  const [actionExecutingId, setActionExecutingId] = useState<string | null>(null);
+
+  const isSpecialistReadOnly = role === 'SPECIALIST';
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleCloseMenu = () => setContextMenu(null);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    window.addEventListener('click', handleCloseMenu);
+    window.addEventListener('contextmenu', handleCloseMenu);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('click', handleCloseMenu);
+      window.removeEventListener('contextmenu', handleCloseMenu);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [contextMenu]);
+
+  const executeQuickAction = async (
+    bookingId: string,
+    action: 'check-in' | 'complete' | 'confirm-deposit' | 'no-show',
+    clientName: string,
+  ) => {
+    if (isSpecialistReadOnly) {
+      showToast('Somente a coordenação pode alterar reservas.', 'error');
+      return;
+    }
+    setActionExecutingId(bookingId);
+    setContextMenu(null);
+
+    const nextStatusMap: Record<typeof action, BookingDto['status']> = {
+      'check-in': 'CHECKED_IN',
+      complete: 'COMPLETED',
+      'confirm-deposit': 'CONFIRMED',
+      'no-show': 'NO_SHOW',
+    };
+    onOptimisticStatusUpdate?.(bookingId, nextStatusMap[action]);
+
+    try {
+      const updated = await apiRequest<BookingDto>(`/bookings/${bookingId}/${action}`, {
+        method: 'POST',
+        token,
+        workspaceId,
+      });
+      onOptimisticStatusUpdate?.(bookingId, updated.status, updated);
+      const toastMsgs: Record<typeof action, string> = {
+        'check-in': `Chegada de ${clientName} registrada com sucesso.`,
+        complete: `Atendimento de ${clientName} concluído com sucesso.`,
+        'confirm-deposit': `Sinal de ${clientName} confirmado com sucesso.`,
+        'no-show': `Falta de ${clientName} registrada. Sinal retido.`,
+      };
+      showToast(toastMsgs[action], 'success');
+      await onRefresh();
+    } catch (err) {
+      const msg =
+        err instanceof ApiHttpError
+          ? formatApiError(err.message, err.code)
+          : 'Erro ao processar ação na reserva.';
+      showToast(msg, 'error');
+      await onRefresh();
+    } finally {
+      setActionExecutingId(null);
+      setNoShowConfirmTarget(null);
+    }
+  };
 
   useEffect(() => {
     if (!toast) return;
@@ -1072,6 +1175,21 @@ export const ResourceTimelineMatrix: React.FC<Props> = ({
                                           e.currentTarget,
                                         );
                                       }}
+                                      onContextMenu={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setContextMenu({
+                                          x: Math.min(e.clientX, window.innerWidth - 270),
+                                          y: Math.min(e.clientY, window.innerHeight - 320),
+                                          bookingId: alloc.bookingId,
+                                          clientName: cleanClient,
+                                          procedureName: alloc.procedureName,
+                                          bookingStatus: alloc.bookingStatus,
+                                          serviceStartAt: alloc.serviceStartAt,
+                                          serviceEndAt: alloc.serviceEndAt,
+                                          resourceId: resource.id,
+                                        });
+                                      }}
                                       onKeyDown={(e) => handleBlockKeyDown(e, popoverKey)}
                                       onMouseEnter={() =>
                                         handleBlockMouseEnter(alloc.bookingId, popoverKey)
@@ -1084,7 +1202,7 @@ export const ResourceTimelineMatrix: React.FC<Props> = ({
                                         setHoveredBookingId(null);
                                         setActivePopoverKey(null);
                                       }}
-                                      className={`absolute top-1.5 bottom-1.5 min-w-[72px] ${
+                                      className={`group absolute top-1.5 bottom-1.5 min-w-[72px] ${
                                         hasCleanup && rawCleanupLeftPx >= serviceLeftPx + serviceWidthPx
                                           ? 'rounded-l-md'
                                           : 'rounded-md'
@@ -1102,12 +1220,41 @@ export const ResourceTimelineMatrix: React.FC<Props> = ({
                                           : 'z-10 shadow-2xs'
                                       }`}
                                     >
-                                      {/* Nome do paciente SEMPRE primeiro (sem ícone nos blocos estreitos para evitar "..." no nome) */}
-                                      <div className="flex items-center gap-1 min-w-0 w-full">
-                                        {serviceWidthPx >= 115 && statusStyle.icon}
-                                        <span className="text-[11px] sm:text-xs font-semibold truncate">
-                                          {patientLabel}
-                                        </span>
+                                      {/* Nome do paciente SEMPRE primeiro (com trigger de ações rápidas no hover) */}
+                                      <div className="flex items-center justify-between gap-1 min-w-0 w-full">
+                                        <div className="flex items-center gap-1 min-w-0 flex-1">
+                                          {serviceWidthPx >= 115 && statusStyle.icon}
+                                          <span className="text-[11px] sm:text-xs font-semibold truncate">
+                                            {patientLabel}
+                                          </span>
+                                        </div>
+                                        {!isSpecialistReadOnly && (
+                                          <span
+                                            role="button"
+                                            tabIndex={-1}
+                                            data-testid={`quick-action-trigger-${alloc.bookingId}`}
+                                            title="Ações rápidas da reserva"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              e.preventDefault();
+                                              const rect = e.currentTarget.getBoundingClientRect();
+                                              setContextMenu({
+                                                x: Math.min(rect.right, window.innerWidth - 270),
+                                                y: Math.min(rect.bottom + 4, window.innerHeight - 320),
+                                                bookingId: alloc.bookingId,
+                                                clientName: cleanClient,
+                                                procedureName: alloc.procedureName,
+                                                bookingStatus: alloc.bookingStatus,
+                                                serviceStartAt: alloc.serviceStartAt,
+                                                serviceEndAt: alloc.serviceEndAt,
+                                                resourceId: resource.id,
+                                              });
+                                            }}
+                                            className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-0.5 rounded hover:bg-black/15 dark:hover:bg-white/20 text-current transition shrink-0"
+                                          >
+                                            <MoreVertical className="w-3 h-3" />
+                                          </span>
+                                        )}
                                       </div>
 
                                       {/* Horário em segundo lugar (e procedimento quando largo) */}
@@ -1377,6 +1524,197 @@ export const ResourceTimelineMatrix: React.FC<Props> = ({
         waitlistEntries={waitlist}
         onNavigateToWaitlist={onNavigateToWaitlist}
       />
+
+      {/* Menu de Contexto Flutuante de Alta Eficiência na Agenda */}
+      {contextMenu && (
+        <div
+          role="menu"
+          data-testid="grid-context-menu"
+          style={{
+            position: 'fixed',
+            top: `${contextMenu.y}px`,
+            left: `${contextMenu.x}px`,
+            zIndex: 9999,
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className="w-64 bg-elevated border border-border-strong rounded-xl shadow-2xl p-1.5 space-y-1 text-xs animate-in fade-in zoom-in-95 duration-100"
+        >
+          <div className="px-2.5 py-2 border-b border-border-subtle">
+            <div className="font-semibold text-ink-primary truncate">
+              {contextMenu.clientName}
+            </div>
+            <div className="text-[11px] text-ink-secondary truncate">
+              {contextMenu.procedureName}
+            </div>
+            <div className="text-[10px] text-ink-muted mt-0.5 tabular-nums">
+              {formatTimeBR(contextMenu.serviceStartAt)} – {formatTimeBR(contextMenu.serviceEndAt)}
+            </div>
+          </div>
+
+          {/* Ações contextuais de ciclo de vida */}
+          {contextMenu.bookingStatus === 'CONFIRMED' && (
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="context-menu-checkin"
+              onClick={() => executeQuickAction(contextMenu.bookingId, 'check-in', contextMenu.clientName)}
+              className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-sunken text-ink-primary font-medium flex items-center gap-2 text-xs transition"
+            >
+              <UserCheck className="w-3.5 h-3.5 text-brand shrink-0" />
+              <span>Registrar chegada (Check-in)</span>
+            </button>
+          )}
+
+          {contextMenu.bookingStatus === 'CHECKED_IN' && (
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="context-menu-complete"
+              onClick={() => executeQuickAction(contextMenu.bookingId, 'complete', contextMenu.clientName)}
+              className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-sunken text-ink-primary font-medium flex items-center gap-2 text-xs transition"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span>Concluir atendimento</span>
+            </button>
+          )}
+
+          {contextMenu.bookingStatus === 'PENDING_DEPOSIT' && (
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="context-menu-confirm-deposit"
+              onClick={() => executeQuickAction(contextMenu.bookingId, 'confirm-deposit', contextMenu.clientName)}
+              className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-sunken text-ink-primary font-medium flex items-center gap-2 text-xs transition"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-brand shrink-0" />
+              <span>Confirmar sinal recebido</span>
+            </button>
+          )}
+
+          {/* Reagendar */}
+          {(contextMenu.bookingStatus === 'CONFIRMED' || contextMenu.bookingStatus === 'PENDING_DEPOSIT') && (
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="context-menu-reschedule"
+              onClick={() => {
+                const target = {
+                  id: contextMenu.bookingId,
+                  clientName: contextMenu.clientName,
+                  procedureName: contextMenu.procedureName,
+                  serviceStartAt: contextMenu.serviceStartAt,
+                  serviceEndAt: contextMenu.serviceEndAt,
+                };
+                setContextMenu(null);
+                setRescheduleTargetBooking(target);
+              }}
+              className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-sunken text-ink-primary font-medium flex items-center gap-2 text-xs transition"
+            >
+              <Calendar className="w-3.5 h-3.5 text-brand shrink-0" />
+              <span>Reagendar horário...</span>
+            </button>
+          )}
+
+          {/* Registrar falta */}
+          {(contextMenu.bookingStatus === 'CONFIRMED' || contextMenu.bookingStatus === 'PENDING_DEPOSIT' || contextMenu.bookingStatus === 'CHECKED_IN') && (
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="context-menu-noshow"
+              onClick={() => {
+                setNoShowConfirmTarget({
+                  bookingId: contextMenu.bookingId,
+                  clientName: contextMenu.clientName,
+                });
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-sunken text-[var(--status-noshow-text)] font-semibold flex items-center gap-2 text-xs transition"
+            >
+              <UserX className="w-3.5 h-3.5 text-[var(--status-noshow-text)] shrink-0" />
+              <span>Registrar falta (No-Show)</span>
+            </button>
+          )}
+
+          <div className="border-t border-border-subtle my-1" />
+
+          {/* Ver detalhes completos */}
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="context-menu-view-details"
+            onClick={() => {
+              handleSelectBooking(contextMenu.bookingId, contextMenu.resourceId);
+              setContextMenu(null);
+            }}
+            className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-sunken text-ink-secondary hover:text-ink-primary font-medium flex items-center gap-2 text-xs transition"
+          >
+            <Clock className="w-3.5 h-3.5 shrink-0" />
+            <span>Ver detalhes completos</span>
+          </button>
+        </div>
+      )}
+
+      {/* Diálogo de Confirmação Rápida de Falta com retenção de sinal */}
+      {noShowConfirmTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={() => setNoShowConfirmTarget(null)}
+        >
+          <div
+            role="alertdialog"
+            data-testid="grid-noshow-confirm-dialog"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-xl bg-surface border border-border-strong shadow-2xl p-5 space-y-4"
+          >
+            <div className="flex items-center gap-2 text-[var(--status-noshow-text)] font-semibold text-base">
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <span>Registrar falta do paciente</span>
+            </div>
+            <p className="text-xs text-ink-secondary leading-relaxed">
+              Tem certeza que deseja registrar a falta de <strong>{noShowConfirmTarget.clientName}</strong>?
+              O paciente será marcado como <strong>Não compareceu</strong> e o sinal será retido conforme as regras.
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setNoShowConfirmTarget(null)}
+                className="min-h-[38px] px-3.5 py-1.5 rounded-lg bg-surface hover:bg-sunken border border-border-subtle text-xs text-ink-primary font-medium transition"
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                disabled={actionExecutingId !== null}
+                data-testid="grid-confirm-noshow-btn"
+                onClick={() => executeQuickAction(noShowConfirmTarget.bookingId, 'no-show', noShowConfirmTarget.clientName)}
+                className="min-h-[38px] px-3.5 py-1.5 rounded-lg bg-[var(--status-error-border)] hover:opacity-90 text-xs text-white font-semibold flex items-center gap-1.5 shadow-xs transition"
+              >
+                {actionExecutingId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                <span>Confirmar falta</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Reagendamento acionado diretamente da grade */}
+      {rescheduleTargetBooking && (
+        <RescheduleModal
+          open={true}
+          booking={rescheduleTargetBooking}
+          procedures={procedures}
+          token={token}
+          workspaceId={workspaceId}
+          onClose={() => setRescheduleTargetBooking(null)}
+          onSuccess={(updated) => {
+            onOptimisticStatusUpdate?.(updated.id, updated.status, updated);
+            showToast(`Reserva de ${rescheduleTargetBooking.clientName} reagendada com sucesso!`, 'success');
+            void onRefresh();
+            setRescheduleTargetBooking(null);
+          }}
+          onToast={showToast}
+        />
+      )}
     </div>
   );
 };

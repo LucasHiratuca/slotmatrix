@@ -282,4 +282,82 @@ describe('SlotMatrix Application Use Cases & Reactive Smart Waitlist Cascade', (
     const all = await h.infra.resources.listByTenant(t.workspaceId);
     expect(all.filter((r) => r.status === 'ARCHIVED')).toHaveLength(2);
   });
+
+  it('reschedules a confirmed booking to a new viable time slot without self-collision', async () => {
+    const h = makeHarness();
+    const t = await registerTenant(h, 'Reschedule Clinic');
+    await upgradeTenant(h, t.workspaceId, 'PRO');
+
+    const dr = await h.c.catalog.createResource.execute({
+      tenantId: t.workspaceId,
+      name: 'Dr. Lucas',
+      category: 'SPECIALIST',
+      capabilities: ['USG'],
+    });
+    const room = await h.c.catalog.createResource.execute({
+      tenantId: t.workspaceId,
+      name: 'Sala 01',
+      category: 'ROOM',
+      capabilities: ['USG'],
+    });
+    const eq = await h.c.catalog.createResource.execute({
+      tenantId: t.workspaceId,
+      name: 'Aparelho USG',
+      category: 'EQUIPMENT',
+      capabilities: ['USG'],
+    });
+
+    const proc = await h.c.catalog.createProcedure.execute({
+      tenantId: t.workspaceId,
+      name: 'Ultrassom Geral',
+      durationMinutes: 40,
+      priceCents: 50000,
+      depositCents: 10000,
+      requirements: [
+        { category: 'SPECIALIST', requiredCapabilities: ['USG'] },
+        { category: 'ROOM', requiredCapabilities: ['USG'], cleanupMinutes: 10 },
+        { category: 'EQUIPMENT', requiredCapabilities: ['USG'] },
+      ],
+    });
+
+    const originalSlot = new Date('2026-06-05T09:00:00Z');
+    const booking = await h.c.scheduling.scheduleBooking.execute({
+      tenantId: t.workspaceId,
+      procedureId: proc.id.value,
+      startAt: originalSlot,
+      clientName: 'Roberto Almeida',
+      clientEmail: 'roberto@paciente.test',
+    });
+
+    // Confirm deposit
+    await h.c.scheduling.confirmDeposit.execute({
+      tenantId: t.workspaceId,
+      bookingId: booking.id.value,
+    });
+
+    // Reschedule to 11:00 on the same day
+    const newSlot = new Date('2026-06-05T11:00:00Z');
+    const rescheduled = await h.c.scheduling.rescheduleBooking.execute({
+      tenantId: t.workspaceId,
+      bookingId: booking.id.value,
+      startAt: newSlot,
+    });
+
+    expect(rescheduled.serviceSlot.startAt.toISOString()).toBe(newSlot.toISOString());
+    expect(rescheduled.status).toBe('CONFIRMED');
+    expect(rescheduled.allocations).toHaveLength(3);
+
+    // Old slot is now free
+    const checkOldSlot = await h.c.queries.availableSlots.execute({
+      tenantId: t.workspaceId,
+      procedureId: proc.id.value,
+      from: new Date('2026-06-05T08:30:00Z'),
+      to: new Date('2026-06-05T10:00:00Z'),
+      stepMinutes: 30,
+    });
+    const foundOldSlot = checkOldSlot.availableSlots.some(
+      (s) => new Date(s.startAt).getTime() === originalSlot.getTime(),
+    );
+    expect(foundOldSlot).toBe(true);
+  });
 });

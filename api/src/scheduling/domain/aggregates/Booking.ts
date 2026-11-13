@@ -8,6 +8,7 @@ import { CancellationPolicyRule } from '../../../catalog/domain/value-objects/Ca
 import {
   BookingCancelledDomainEvent,
   BookingDepositConfirmedDomainEvent,
+  BookingRescheduledDomainEvent,
   BookingScheduledDomainEvent,
   NoShowRecordedDomainEvent,
 } from '../events/scheduling-events';
@@ -308,6 +309,31 @@ export class Booking extends AggregateRoot<BookingProps> {
     }
     this.props.status = 'EXPIRED';
     this.bump(now);
+  }
+
+  /**
+   * PENDING_DEPOSIT | CONFIRMED -> Reagenda para novo serviceSlot com novas alocações.
+   */
+  reschedule(newServiceSlot: TimeSlot, newAllocations: ResourceAllocation[], now: Date): void {
+    if (this.props.status !== 'CONFIRMED' && this.props.status !== 'PENDING_DEPOSIT') {
+      throw new InvalidStateTransitionError(`Cannot reschedule booking in status ${this.props.status}`);
+    }
+    const previousStartAt = this.props.serviceSlot.startAt;
+    this.props.serviceSlot = newServiceSlot;
+    this.props.allocations = newAllocations.map((a) => Object.freeze({ ...a }));
+    this.bump(now);
+    this.addDomainEvent(
+      new BookingRescheduledDomainEvent(
+        this.props.tenantId.value,
+        this.id.value,
+        this.props.procedureId.value,
+        this.props.clientName,
+        previousStartAt,
+        newServiceSlot.startAt,
+        newServiceSlot.endAt,
+        now,
+      ),
+    );
   }
 
   private bump(now: Date) {

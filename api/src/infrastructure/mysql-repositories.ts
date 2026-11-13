@@ -378,6 +378,8 @@ export class MySqlBookingRepository implements IBookingRepository {
         origin_waitlist_entry_id, version, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
+        service_start_at = VALUES(service_start_at),
+        service_end_at = VALUES(service_end_at),
         status = VALUES(status),
         deposit_status = VALUES(deposit_status),
         deposit_expires_at = VALUES(deposit_expires_at),

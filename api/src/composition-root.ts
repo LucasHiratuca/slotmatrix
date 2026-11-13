@@ -39,6 +39,7 @@ import {
   ExpireWaitlistOfferUseCase,
   JoinWaitlistUseCase,
   RecordBookingNoShowUseCase,
+  RescheduleBookingUseCase,
   ScheduleMultiResourceBookingUseCase,
 } from './scheduling/application/use-cases';
 import {
@@ -139,6 +140,7 @@ export function buildContainer(infra: Infrastructure, config: AppConfig) {
     complete: new CompleteBookingUseCase(schedDeps),
     cancelBooking: new CancelBookingUseCase(schedDeps),
     recordNoShow: new RecordBookingNoShowUseCase(schedDeps),
+    rescheduleBooking: new RescheduleBookingUseCase(schedDeps),
     joinWaitlist: new JoinWaitlistUseCase(schedDeps),
     claimWaitlistOffer: new ClaimWaitlistOfferUseCase(schedDeps),
     expireWaitlistOffer: new ExpireWaitlistOfferUseCase(schedDeps),

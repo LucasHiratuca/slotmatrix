@@ -8,6 +8,7 @@ import {
   WaitlistEntryDto,
 } from './api';
 import { AuditEntryItem } from './AuditView';
+import { RescheduleModal } from './RescheduleModal';
 import {
   cleanPersonName,
   formatApiError,
@@ -24,6 +25,7 @@ import {
 import { Avatar, BookingStatusBadge, ResourceTile } from './ui/Primitives';
 import {
   AlertCircle,
+  Calendar,
   CalendarPlus,
   Check,
   CheckCircle2,
@@ -130,6 +132,7 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
   const [confirmDialog, setConfirmDialog] = useState<
     null | { type: 'cancel' | 'no-show' | 'cancel-recreate' }
   >(null);
+  const [rescheduleModalOpen, setRescheduleModalOpen] = useState<boolean>(false);
   const [nowTick, setNowTick] = useState<number>(() => Date.now());
 
   // Gestos de arrasto para fechar no mobile (Bottom Sheet)
@@ -665,6 +668,10 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
     status === 'CONFIRMED' ||
     status === 'CHECKED_IN';
 
+  const canReschedule =
+    !isSpecialistReadOnly &&
+    (status === 'CONFIRMED' || status === 'PENDING_DEPOSIT');
+
   return (
     <div
       className="fixed inset-0 z-50 bg-black/35 flex items-end md:items-stretch justify-end"
@@ -1196,16 +1203,37 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
                 </div>
               )}
 
-              {/* Botão secundário "Reagendar" desabilitado com explicação + alternativa assistida no menu */}
+              {/* Botão de Reagendar horário funcional */}
               <button
                 type="button"
-                disabled
-                data-testid="drawer-reschedule-disabled"
-                title="Reagendamento direto no mesmo registro requer endpoint PATCH /api/bookings/:id no backend. Use 'Cancelar e criar nova reserva' no menu (⋯) ao lado."
-                className="min-h-[44px] px-3 py-2 rounded-lg bg-surface border border-border-subtle text-xs font-medium text-ink-muted opacity-65 cursor-not-allowed shrink-0"
+                disabled={!canReschedule || actionLoading !== null}
+                data-testid="drawer-reschedule-btn"
+                onClick={() => setRescheduleModalOpen(true)}
+                title={
+                  canReschedule
+                    ? 'Reagendar para novo horário mantendo os 3 recursos simultâneos'
+                    : 'Reagendamento disponível apenas para reservas confirmadas ou aguardando sinal.'
+                }
+                className="min-h-[44px] px-3.5 py-2 rounded-lg bg-surface hover:bg-sunken border border-border-subtle text-xs font-semibold text-ink-primary disabled:opacity-50 disabled:cursor-not-allowed transition shrink-0 flex items-center gap-1.5 shadow-2xs"
               >
-                Reagendar
+                <Calendar className="w-3.5 h-3.5 text-brand" />
+                <span>Reagendar</span>
               </button>
+
+              {/* Botão destacado de Registrar falta (No-Show) */}
+              {canCancelOrNoShow && (
+                <button
+                  type="button"
+                  disabled={actionLoading !== null}
+                  data-testid="drawer-noshow-btn"
+                  onClick={() => setConfirmDialog({ type: 'no-show' })}
+                  title="Registrar falta (No-Show) do paciente com retenção do sinal"
+                  className="min-h-[44px] px-3.5 py-2 rounded-lg bg-[var(--status-noshow-bg)] hover:bg-[var(--status-noshow-border)]/20 border border-[var(--status-noshow-border)] text-xs font-semibold text-[var(--status-noshow-text)] transition shrink-0 flex items-center gap-1.5 shadow-2xs"
+                >
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>Registrar falta</span>
+                </button>
+              )}
 
               {/* Menu "⋯" com ações secundárias / destrutivas */}
               {canCancelOrNoShow && (
@@ -1275,6 +1303,38 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
           )}
         </div>
       </aside>
+
+      {/* Modal interativo de Reagendamento com alocação simultânea de 3 recursos */}
+      {rescheduleModalOpen && (activeBookingDto || fallbackBooking) && (
+        <RescheduleModal
+          open={rescheduleModalOpen}
+          booking={
+            activeBookingDto ?? {
+              id: fallbackBooking!.bookingId,
+              clientName: fallbackBooking!.clientName,
+              procedureName: fallbackBooking!.procedureName,
+              procedureId: matchedProcedure?.id,
+              serviceStartAt: fallbackBooking!.serviceStartAt,
+              serviceEndAt: fallbackBooking!.serviceEndAt,
+            }
+          }
+          procedures={procedures}
+          token={token}
+          workspaceId={workspaceId}
+          onClose={() => setRescheduleModalOpen(false)}
+          onSuccess={(updated) => {
+            setFetchedBooking(updated);
+            onOptimisticStatusUpdate?.(updated.id, updated.status, updated);
+            onToast?.(
+              `Reserva de ${clientName} reagendada com sucesso com especialista, sala e equipamento garantidos!`,
+              'success',
+            );
+            void onRefresh();
+            setRescheduleModalOpen(false);
+          }}
+          onToast={onToast}
+        />
+      )}
     </div>
   );
 };

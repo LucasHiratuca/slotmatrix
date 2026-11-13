@@ -531,6 +531,28 @@ export function registerRoutes(kit: RouterKit, c: Container) {
   });
 
   kit.add({
+    method: 'post',
+    path: '/bookings/:id/reschedule',
+    tag: 'Scheduling',
+    summary: 'Reschedule booking atomically checking multi-resource availability',
+    access: 'tenant',
+    minRole: 'COORDINATOR',
+    body: z.object({
+      startAt: z.string().datetime(),
+      preferredResourceIds: z.array(z.string().min(1)).optional(),
+    }),
+    handler: async ({ tenant, params, body }) =>
+      bookingDto(
+        await scheduling.rescheduleBooking.execute({
+          tenantId: tenant.tenantId,
+          bookingId: params.id,
+          startAt: new Date(body.startAt),
+          preferredResourceIds: body.preferredResourceIds,
+        }),
+      ),
+  });
+
+  kit.add({
     method: 'get',
     path: '/timeline',
     tag: 'Scheduling',

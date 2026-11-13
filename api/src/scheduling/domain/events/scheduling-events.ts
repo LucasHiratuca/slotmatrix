@@ -53,6 +53,20 @@ export class NoShowRecordedDomainEvent implements DomainEvent {
   ) {}
 }
 
+export class BookingRescheduledDomainEvent implements DomainEvent {
+  readonly name = 'BookingRescheduled';
+  constructor(
+    readonly tenantId: string,
+    readonly aggregateId: string,
+    readonly procedureId: string,
+    readonly clientName: string,
+    readonly previousStartAt: Date,
+    readonly newStartAt: Date,
+    readonly newEndAt: Date,
+    readonly occurredAt: Date,
+  ) {}
+}
+
 export class WaitlistSlotOfferedDomainEvent implements DomainEvent {
   readonly name = 'WaitlistSlotOffered';
   constructor(

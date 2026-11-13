@@ -513,4 +513,126 @@ describe('FIX Agenda — Interação com reservas (clicar, teclado, drawer, RBAC
     expect(screen.getByRole('button', { name: /Confirmar reserva agora/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Passar ao próximo/i })).toBeTruthy();
   });
+
+  it('9. Botão proeminente "Registrar falta" no rodapé do drawer abre confirmação e executa no-show retendo 100% do sinal', async () => {
+    vi.useRealTimers();
+    const updatedBooking: BookingDto = {
+      ...SAMPLE_BOOKING,
+      status: 'NO_SHOW',
+      retainedCents: 20000,
+    };
+    globalThis.fetch = vi.fn(async (url: any) => {
+      if (String(url).includes('/no-show')) {
+        return new Response(JSON.stringify(updatedBooking), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify(SAMPLE_BOOKING), { status: 200 });
+    });
+    const onOptimisticStatusUpdate = vi.fn();
+
+    render(
+      <ResourceTimelineMatrix
+        token="tok"
+        workspaceId="ws-1"
+        timeline={SAMPLE_TIMELINE}
+        selectedDate="2026-11-12"
+        onDateChange={vi.fn()}
+        procedures={[SAMPLE_PROCEDURE]}
+        bookings={[SAMPLE_BOOKING]}
+        resourcesCatalog={SAMPLE_RESOURCES}
+        role="COORDINATOR"
+        onOptimisticStatusUpdate={onOptimisticStatusUpdate}
+        onRefresh={vi.fn(async () => {})}
+      />,
+    );
+
+    // Abre o drawer clicando no bloco
+    fireEvent.click(screen.getByTestId('booking-block-booking-roberto-1-res-spec-1'));
+
+    // Botão destacado de Registrar Falta está visível diretamente no rodapé
+    const noShowBtn = screen.getByTestId('drawer-noshow-btn');
+    expect(noShowBtn).toBeTruthy();
+    expect(noShowBtn.textContent).toContain('Registrar falta');
+
+    fireEvent.click(noShowBtn);
+
+    // Diálogo com aviso de retenção de 100% do sinal
+    const dialog = screen.getByTestId('drawer-confirm-dialog');
+    expect(dialog.textContent).toContain('100% do sinal');
+    expect(dialog.textContent).toMatch(/200,00/);
+
+    // Confirma falta
+    const confirmBtn = screen.getByTestId('drawer-confirm-destructive-btn');
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(onOptimisticStatusUpdate).toHaveBeenCalledWith(
+        'booking-roberto-1',
+        'NO_SHOW',
+        updatedBooking,
+      );
+    });
+  });
+
+  it('10. Botão "Reagendar" no drawer está ativo para reservas confirmadas e abre modal de reagendamento', async () => {
+    vi.useRealTimers();
+    render(
+      <ResourceTimelineMatrix
+        token="tok"
+        workspaceId="ws-1"
+        timeline={SAMPLE_TIMELINE}
+        selectedDate="2026-11-12"
+        onDateChange={vi.fn()}
+        procedures={[SAMPLE_PROCEDURE]}
+        bookings={[SAMPLE_BOOKING]}
+        resourcesCatalog={SAMPLE_RESOURCES}
+        role="COORDINATOR"
+        onRefresh={vi.fn(async () => {})}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('booking-block-booking-roberto-1-res-spec-1'));
+
+    const rescheduleBtn = screen.getByTestId('drawer-reschedule-btn');
+    expect(rescheduleBtn).toBeTruthy();
+    expect(rescheduleBtn.hasAttribute('disabled')).toBe(false);
+
+    fireEvent.click(rescheduleBtn);
+
+    // Modal de reagendamento aberto com dados do paciente e procedimento
+    expect(screen.getByTestId('reschedule-modal')).toBeTruthy();
+    expect(screen.getByText(/Reagendar atendimento/i)).toBeTruthy();
+    expect(screen.getAllByText('Roberto Almeida').length).toBeGreaterThan(0);
+  });
+
+  it('11. Menu de contexto (botão direito) no card da grade exibe ações rápidas diretas', async () => {
+    vi.useRealTimers();
+    render(
+      <ResourceTimelineMatrix
+        token="tok"
+        workspaceId="ws-1"
+        timeline={SAMPLE_TIMELINE}
+        selectedDate="2026-11-12"
+        onDateChange={vi.fn()}
+        procedures={[SAMPLE_PROCEDURE]}
+        bookings={[SAMPLE_BOOKING]}
+        resourcesCatalog={SAMPLE_RESOURCES}
+        role="COORDINATOR"
+        onRefresh={vi.fn(async () => {})}
+      />,
+    );
+
+    const block = screen.getByTestId('booking-block-booking-roberto-1-res-spec-1');
+    fireEvent.contextMenu(block, { clientX: 200, clientY: 200 });
+
+    // Menu de contexto flutuante na grade
+    const menu = screen.getByTestId('grid-context-menu');
+    expect(menu).toBeTruthy();
+    expect(screen.getByTestId('context-menu-checkin')).toBeTruthy();
+    expect(screen.getByTestId('context-menu-reschedule')).toBeTruthy();
+    expect(screen.getByTestId('context-menu-noshow')).toBeTruthy();
+    expect(screen.getByTestId('context-menu-view-details')).toBeTruthy();
+  });
 });
