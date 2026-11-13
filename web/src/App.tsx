@@ -1461,6 +1461,10 @@ export const App: React.FC = () => {
             >
               <ProceduresView
                 procedures={procedures}
+                workspaceId={activeWorkspaceId ?? ''}
+                token=""
+                plan={overview?.subscription?.plan ?? 'STARTER'}
+                securityDepositEnabled={overview?.entitlements?.securityDepositEnabled ?? false}
                 canManageProcedures={canManageResources}
                 onRefresh={() => refreshWorkspaceData(false)}
                 onScheduleProcedure={(procedureId) => {

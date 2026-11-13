@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { apiRequest, ApiHttpError, ServiceProcedureDto } from './api';
+import { apiRequest, ApiHttpError, ServiceProcedureDto, PlanCode } from './api';
 import {
   formatCapability,
   formatCurrencyBRL,
@@ -20,6 +20,10 @@ import {
 
 interface ProceduresViewProps {
   procedures: ServiceProcedureDto[];
+  workspaceId?: string;
+  token?: string | null;
+  plan?: PlanCode;
+  securityDepositEnabled?: boolean;
   canManageProcedures?: boolean;
   onRefresh?: () => Promise<void>;
   onScheduleProcedure?: (procedureId: string) => void;
@@ -60,6 +64,10 @@ const CATEGORY_STYLE: Record<
 
 export const ProceduresView: React.FC<ProceduresViewProps> = ({
   procedures,
+  workspaceId,
+  token,
+  plan = 'STARTER',
+  securityDepositEnabled = false,
   canManageProcedures = true,
   onRefresh,
   onScheduleProcedure,
@@ -107,7 +115,7 @@ export const ProceduresView: React.FC<ProceduresViewProps> = ({
 
     const cleanPrice = parseFloat(priceBRL.replace(/\./g, '').replace(',', '.')) || 0;
     const priceCents = Math.round(cleanPrice * 100);
-    const depositCents = Math.round((priceCents * depositPercent) / 100);
+    const depositCents = securityDepositEnabled ? Math.round((priceCents * depositPercent) / 100) : 0;
 
     const requirements: any[] = [];
     if (hasSpecialist) {
@@ -139,6 +147,8 @@ export const ProceduresView: React.FC<ProceduresViewProps> = ({
       setIsSubmitting(true);
       await apiRequest('/procedures', {
         method: 'POST',
+        token,
+        workspaceId,
         body: {
           name: name.trim(),
           durationMinutes: Number(durationMinutes),
@@ -404,16 +414,22 @@ export const ProceduresView: React.FC<ProceduresViewProps> = ({
                 <label className="block text-xs font-medium text-ink-primary mb-1">
                   Sinal de Reserva Obrigatório
                 </label>
-                <select
-                  value={depositPercent}
-                  onChange={(e) => setDepositPercent(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-xs bg-canvas border border-border-subtle rounded-lg text-ink-primary focus:outline-none focus:ring-1 focus:ring-brand"
-                >
-                  <option value={0}>Sem sinal (0% — padrão Starter)</option>
-                  <option value={10}>10% de sinal</option>
-                  <option value={20}>20% de sinal (recomendado Pro/Enterprise)</option>
-                  <option value={30}>30% de sinal</option>
-                </select>
+                {securityDepositEnabled ? (
+                  <select
+                    value={depositPercent}
+                    onChange={(e) => setDepositPercent(Number(e.target.value))}
+                    className="w-full px-3 py-2 text-xs bg-canvas border border-border-subtle rounded-lg text-ink-primary focus:outline-none focus:ring-1 focus:ring-brand"
+                  >
+                    <option value={0}>Sem sinal (0%)</option>
+                    <option value={10}>10% de sinal</option>
+                    <option value={20}>20% de sinal (recomendado)</option>
+                    <option value={30}>30% de sinal</option>
+                  </select>
+                ) : (
+                  <div className="p-2.5 rounded-lg border border-border-subtle bg-sunken/40 text-xs text-ink-secondary">
+                    <span>Sem sinal de reserva (0%) — Cobrança de sinal anti-no-show requer plano <strong>Pro</strong> ou <strong>Enterprise</strong>.</span>
+                  </div>
+                )}
               </div>
 
               <div className="pt-2 border-t border-border-subtle space-y-3">
