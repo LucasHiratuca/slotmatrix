@@ -78,6 +78,7 @@ interface Props {
   initialClientName?: string | null;
   initialClientEmail?: string | null;
   onConsumePrefill?: () => void;
+  onNavigateToAgenda?: (dateIso: string, bookingId: string) => void;
 }
 
 const STATUS_BADGE: Record<BookingDto['status'], string> = {
@@ -115,6 +116,7 @@ export const SmartBookingWizard: React.FC<Props> = ({
   initialClientName = null,
   initialClientEmail = null,
   onConsumePrefill,
+  onNavigateToAgenda,
 }) => {
   const [showNewBookingPanel, setShowNewBookingPanel] = useState<boolean>(initialOpenNewBooking);
   const [selectedProcedureId, setSelectedProcedureId] = useState<string>(
@@ -222,7 +224,10 @@ export const SmartBookingWizard: React.FC<Props> = ({
         text: `Reserva criada (${formatBookingStatus(created.status)}) para ${cleanPersonName(created.clientName)} com alocação simultânea de ${created.allocations.length} recursos.`,
       });
       await onRefresh();
-      await loadAvailableSlots(selectedProcedureId, selectedDate);
+      setShowNewBookingPanel(false);
+      setSelectedSlot(null);
+      const bookingDate = created.startAt ? created.startAt.split('T')[0] : selectedDate;
+      onNavigateToAgenda?.(bookingDate, created.id);
     } catch (err) {
       const msg =
         err instanceof ApiHttpError

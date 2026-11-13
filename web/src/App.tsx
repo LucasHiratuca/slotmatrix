@@ -75,6 +75,31 @@ export type ActivePage =
   | 'billing'
   | 'audit';
 
+const VALID_PAGES: ActivePage[] = [
+  'overview',
+  'agenda',
+  'bookings',
+  'waitlist',
+  'resources',
+  'procedures',
+  'billing',
+  'audit',
+];
+
+function getInitialActivePage(): ActivePage {
+  try {
+    const hash = window.location.hash.replace('#', '').trim() as ActivePage;
+    if (VALID_PAGES.includes(hash)) {
+      return hash;
+    }
+    const saved = localStorage.getItem('slotmatrix_active_page') as ActivePage;
+    if (VALID_PAGES.includes(saved)) {
+      return saved;
+    }
+  } catch {}
+  return 'agenda';
+}
+
 export const App: React.FC = () => {
   const initialSlugMatch = window.location.pathname.match(/^\/book\/([^/]+)/);
   const [publicPortalSlug, setPublicPortalSlug] = useState<string | null>(
@@ -150,7 +175,28 @@ export const App: React.FC = () => {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  const [activePage, setActivePage] = useState<ActivePage>('agenda');
+  const [activePage, setActivePageState] = useState<ActivePage>(() => getInitialActivePage());
+
+  const setActivePage = useCallback((page: ActivePage) => {
+    setActivePageState(page);
+    try {
+      localStorage.setItem('slotmatrix_active_page', page);
+      if (window.location.hash !== `#${page}`) {
+        window.location.hash = page;
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const hash = window.location.hash.replace('#', '').trim() as ActivePage;
+      if (VALID_PAGES.includes(hash)) {
+        setActivePageState(hash);
+      }
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
   const [selectedDate, setSelectedDate] = useState<string>(() =>
     getTodayClinicIsoDate(),
   );
@@ -1404,6 +1450,12 @@ export const App: React.FC = () => {
                   setPrefillProcedureId(null);
                   setPrefillClientName(null);
                   setPrefillClientEmail(null);
+                }}
+                onNavigateToAgenda={(bookingDate) => {
+                  if (bookingDate) {
+                    setSelectedDate(bookingDate);
+                  }
+                  setActivePage('agenda');
                 }}
               />
             </ErrorBoundary>
