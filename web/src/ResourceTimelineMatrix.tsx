@@ -84,6 +84,7 @@ interface Props {
     clientEmail?: string;
   }) => void;
   onNavigateToWaitlist?: () => void;
+  onPauseAutoRefresh?: (paused: boolean) => void;
 }
 
 const START_HOUR = 7; // 07:00 America/Sao_Paulo
@@ -229,6 +230,7 @@ export const ResourceTimelineMatrix: React.FC<Props> = ({
   lastUpdatedAt,
   onQuickSchedule,
   onNavigateToWaitlist,
+  onPauseAutoRefresh,
 }) => {
   // Zoom padrão 100% (128px/h) para que reservas de 25 a 45 min mostrem nome + horário sem precisar de hover
   const [hourWidthPx, setHourWidthPx] = useState<60 | 96 | 128>(128);
@@ -1523,6 +1525,7 @@ export const ResourceTimelineMatrix: React.FC<Props> = ({
         offerHold={selectedOfferHold}
         waitlistEntries={waitlist}
         onNavigateToWaitlist={onNavigateToWaitlist}
+        onPauseAutoRefresh={onPauseAutoRefresh}
       />
 
       {/* Menu de Contexto Flutuante de Alta Eficiência na Agenda */}

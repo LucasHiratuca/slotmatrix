@@ -425,13 +425,15 @@ export const App: React.FC = () => {
     }
   }, [authenticated, isCheckingSession, refreshWorkspaceData, previewAgendaVariant, isExplicitDemoMode]);
 
+  const [autoRefreshPaused, setAutoRefreshPaused] = useState<boolean>(false);
+
   useEffect(() => {
-    if (!authenticated || !overview) return;
+    if (!authenticated || !overview || autoRefreshPaused) return;
     const timer = window.setInterval(() => {
       void refreshWorkspaceData(true);
     }, 60_000);
     return () => window.clearInterval(timer);
-  }, [authenticated, overview, refreshWorkspaceData]);
+  }, [authenticated, overview, autoRefreshPaused, refreshWorkspaceData]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -1177,6 +1179,7 @@ export const App: React.FC = () => {
                     setActivePage('bookings');
                   }}
                   onNavigateToWaitlist={() => setActivePage('waitlist')}
+                  onPauseAutoRefresh={setAutoRefreshPaused}
                 />
               )}
             </ErrorBoundary>
