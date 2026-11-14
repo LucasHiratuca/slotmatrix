@@ -166,7 +166,7 @@ A arquitetura do *SlotMatrix* é composta por microsserviços desacoplados inter
 
 O sistema está implantado na infraestrutura de nuvem virtualizada da Fatec Pompeia (ambiente Proxmox / Ubuntu Server), gerenciado por meio de uma stack no *Portainer*.
 
-- *Nome da Stack:* `slotmatrix`
+- *Nome da Stack:* `slotmatrix-lucas` (ou `slotmatrix`)
 - *Repositório de Origem:* `https://github.com/LucasHiratuca/slotmatrix` (branch `main`)
 - *Containers Ativos e Limites Operacionais:*
   - `slotmatrix_db`: MariaDB 11.4 com volume persistente `slotmatrix_db_data` (limite de memória: 512 MB; healthcheck com `healthcheck.sh`).
@@ -175,7 +175,7 @@ O sistema está implantado na infraestrutura de nuvem virtualizada da Fatec Pomp
   - `slotmatrix_worker`: Worker BullMQ executando comandos em segundo plano (limite de memória: 256 MB).
   - `slotmatrix_web`: Nginx servindo o bundle estático da aplicação React e atuando como proxy reverso para `/api` (limite de memória: 128 MB).
 - *Variáveis de Ambiente da Stack (Nomes):* `NODE_ENV`, `PORT`, `APP_PUBLIC_URL`, `CORS_ORIGINS`, `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `BILLING_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_USE_SSL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `SMTP_SECURE`, `AUTO_SEED`, `ENABLE_API_DOCS`.
-- *URL Pública e Acesso:* Console Web no ar via proxy reverso no domínio da VM (`http://localhost:18174` em desenvolvimento local) e documentação interativa Swagger em `/api/docs` (`http://localhost:18081/api/docs`).
+- *URL Pública e Acesso:* Console Web no ar via proxy reverso no domínio oficial `https://lucas-hiratuca-isw055.lapps.studio` (e `http://localhost:18174` em desenvolvimento local) e documentação interativa Swagger em `/api/docs` (`http://localhost:18081/api/docs`).
 
 == Fluxo de uma requisição
 
@@ -250,7 +250,7 @@ A governança de segurança do SlotMatrix apoia-se em três pilares rigorosos:
 O sistema conta com um conjunto completo de ferramentas de observabilidade e documentação:
 - *Health Checks de Liveness:* Endpoint `GET /api/health` monitorado continuamente pelo Docker daemon a cada 10 segundos para reinicialização preventiva de containers degradados.
 - *Documentação Interativa OpenAPI 3.0 (Swagger):* Disponibilizada publicamente em `http://localhost:18081/api/docs`, detalhando schemas de entrada e saída com validação Zod.
-- *Suíte de Testes Automatizados (Vitest):* 16 suítes totalizando 103 testes automatizados (70 no backend e 33 no frontend), cobrindo a integridade dos agregados, controle RBAC, cálculo do MRR, bloqueio de quotas, tratamento idempotente dos 4 eventos de webhook da Stripe e a máquina de estados das reservas.
+- *Suíte de Testes Automatizados (Vitest):* 13 suítes totalizando 84 testes automatizados no backend e suíte de componentes no frontend, cobrindo a integridade dos agregados, controle RBAC, cálculo do MRR, bloqueio de quotas, tratamento idempotente dos 4 eventos de webhook da Stripe e a máquina de estados das reservas.
 - *Pipeline de CI/CD:* Não foi implementado pipeline automatizado em nuvem via GitHub Actions; a validação contínua e a prevenção de regressão foram asseguradas localmente pela execução automatizada da suíte Vitest pré-commits e pela verificação preventiva de liveness pelo Docker daemon.
 
 #evidencia([Documentação interativa OpenAPI 3.0 (Swagger) disponibilizada pela API em tema escuro], arquivo: "prints/api_swagger.png")

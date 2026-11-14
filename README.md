@@ -159,7 +159,7 @@ Ao inicializar o sistema (ou rodar `npm run seed`), o banco é provisionado com 
 docker compose up --build -d
 ```
 
-### Executar Testes Automatizados (40 Testes em 7 Suítes)
+### Executar Testes Automatizados (84 Testes em 13 Suítes)
 ```bash
 cd api
 npm install
